@@ -1,0 +1,57 @@
+{
+  "name": "@capivapp/thesync",
+  "version": "0.1.0",
+  "description": "Motor de sincronização offline-first: espelho local, fila de escritas e anexos para Expo, com o lado servidor para Express + Prisma.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/capivApp/thesync.git"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./protocol": "./src/protocol/index.ts",
+    "./client": "./src/client/index.ts",
+    "./server": "./src/server/index.ts"
+  },
+  "files": [
+    "src",
+    "docs",
+    "README.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "offline-first",
+    "sync",
+    "expo",
+    "react-native",
+    "sqlite",
+    "prisma",
+    "outbox"
+  ],
+  "peerDependencies": {
+    "@prisma/client": ">=6",
+    "@tanstack/react-query": ">=5",
+    "expo-crypto": "*",
+    "expo-file-system": "*",
+    "expo-network": "*",
+    "expo-sqlite": "*",
+    "express": ">=4",
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "@prisma/client": { "optional": true },
+    "@tanstack/react-query": { "optional": true },
+    "expo-crypto": { "optional": true },
+    "expo-file-system": { "optional": true },
+    "expo-network": { "optional": true },
+    "expo-sqlite": { "optional": true },
+    "express": { "optional": true },
+    "react": { "optional": true }
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
+}
