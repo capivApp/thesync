@@ -18,6 +18,7 @@ import {
     jaEnfileirado,
     recuperarAnexosEmVoo,
 } from '../persistencia/anexos';
+import { gravarEstado, lerEstado } from '../persistencia/marcaDagua';
 import { gravarLote, lerRegistro } from '../persistencia/registros';
 import {
     contarPendencias,
@@ -129,6 +130,36 @@ export class Motor {
             this.emissor,
             sinal,
         );
+    }
+
+    /**
+     * Refaz a carga do zero, jogando fora a marca d'água.
+     *
+     * A sincronização incremental não tem como se corrigir sozinha: uma vez
+     * marcada como completa, ela só pergunta o que mudou desde o cursor. Se o
+     * espelho divergir por qualquer motivo — um erro do app, um registro que
+     * saiu do escopo, uma reconciliação indevida — não existe incremento que
+     * conserte, porque do lado do servidor não mudou nada. A única saída é
+     * esquecer onde parou e baixar tudo de novo, e é o que isto faz.
+     *
+     * Sem ela, o único conserto para um espelho errado era desinstalar o app.
+     */
+    async recarregarTabela(
+        contexto: ContextoSync,
+        nome: string,
+        sinal?: AbortSignal,
+    ): Promise<void> {
+        const estado = await lerEstado(contexto, nome);
+        await gravarEstado(contexto, {
+            ...estado,
+            cursor: null,
+            cursorPagina: null,
+            cargaCompletaEm: null,
+            reconciliadoEm: null,
+            ultimoErro: null,
+        });
+
+        await this.sincronizarTabela(contexto, nome, sinal);
     }
 
     /**
