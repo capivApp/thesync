@@ -76,6 +76,43 @@ const valorIndexado = (coluna: ColunaIndexada, registro: unknown) => {
 };
 
 /**
+ * Mescla um registro PARCIAL sobre o que já está no espelho.
+ *
+ * Algumas respostas trazem só um recorte do registro — o upload de anexo, por
+ * exemplo, devolve `{id, bem: {id, imagens}}`. Gravar isso por cima apagaria
+ * nome, plaqueta e localização, e a linha apareceria em branco na tela.
+ *
+ * A mesclagem é de um nível: chaves de topo são substituídas, e chaves cujo
+ * valor é objeto nos DOIS lados são mescladas. Array substitui — é o que faz a
+ * lista de imagens nova valer sem perder o resto do relacionamento.
+ */
+const mesclarParcial = (atual: any, novo: any): any => {
+    if (!atual || typeof atual !== 'object') return novo;
+
+    const resultado: Record<string, any> = { ...atual };
+
+    for (const [chave, valor] of Object.entries(novo ?? {})) {
+        const anterior = resultado[chave];
+        const ambosObjetos =
+            anterior && typeof anterior === 'object' && !Array.isArray(anterior) &&
+            valor && typeof valor === 'object' && !Array.isArray(valor);
+
+        resultado[chave] = ambosObjetos ? { ...anterior, ...(valor as object) } : valor;
+    }
+
+    return resultado;
+};
+
+export interface OpcoesDeGravacao {
+    origem?: 'servidor' | 'local';
+    /**
+     * O lote traz recortes, não registros inteiros: mescle sobre o que existe
+     * em vez de substituir.
+     */
+    parcial?: boolean;
+}
+
+/**
  * Grava um lote de registros do servidor.
  *
  * UMA transação com statement preparado. Milhares de gravações soltas levam
@@ -85,9 +122,12 @@ export const gravarLote = async (
     contexto: ContextoSync,
     tabela: DefinicaoTabela,
     brutos: unknown[],
-    origem: 'servidor' | 'local' = 'servidor',
+    opcoes: 'servidor' | 'local' | OpcoesDeGravacao = 'servidor',
 ): Promise<number> => {
     if (brutos.length === 0) return 0;
+
+    const { origem = 'servidor', parcial = false } =
+        typeof opcoes === 'string' ? { origem: opcoes, parcial: false } : opcoes;
 
     const banco = await bancoDaEntidade(contexto.entidade);
     const agora = Date.now();
@@ -120,12 +160,18 @@ export const gravarLote = async (
                 const id = idDoRegistro(tabela, bruto);
                 if (!id) continue;
 
-                const updatedAt = (bruto as any)?.updatedAt ?? null;
+                // Recorte: junta com o que já existe antes de gravar.
+                const anterior = parcial
+                    ? (await lerRegistro<any>(contexto, tabela.nome, id))?.dados
+                    : null;
+                const registro = parcial ? mesclarParcial(anterior, bruto) : bruto;
+
+                const updatedAt = (registro as any)?.updatedAt ?? null;
                 await gravarRegistro.executeAsync([
                     contexto.entidade,
                     tabela.nome,
                     id,
-                    JSON.stringify(bruto),
+                    JSON.stringify(registro),
                     typeof updatedAt === 'string' ? updatedAt : null,
                     origem,
                     agora,
@@ -134,7 +180,7 @@ export const gravarLote = async (
 
                 // Índice na MESMA transação do registro, senão o índice mente.
                 for (const coluna of colunas) {
-                    const { texto, numero } = valorIndexado(coluna, bruto);
+                    const { texto, numero } = valorIndexado(coluna, registro);
                     await gravarIndice.executeAsync([
                         contexto.entidade,
                         tabela.nome,

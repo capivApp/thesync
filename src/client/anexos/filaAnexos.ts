@@ -110,7 +110,10 @@ export class FilaDeAnexos {
 
             const atualizado = definicao.aplicarResposta?.(resposta);
             if (atualizado) {
-                await gravarLote(contexto, tabela, [atualizado]);
+                // A resposta do upload é um RECORTE (`{id, bem: {id, imagens}}`).
+                // Gravá-la por cima apagaria nome, plaqueta e localização, e a
+                // linha voltaria em branco para a tela.
+                await gravarLote(contexto, tabela, [atualizado], { parcial: true });
                 this.emissor.emitir('registro:alterado', {
                     tabela: tabela.nome,
                     id: anexo.registroId,

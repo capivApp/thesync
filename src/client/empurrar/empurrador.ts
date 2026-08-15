@@ -101,7 +101,10 @@ export class Empurrador {
         // de volta para o valor antigo entre o envio e a próxima sincronização.
         const atual = await lerRegistro<Record<string, unknown>>(contexto, tabela.nome, pendencia.registroId);
         if (atual) {
-            await gravarLote(contexto, tabela, [{ ...atual.dados, ...pendencia.payload }]);
+            // Parcial: o payload da pendência tem só os campos editados.
+            await gravarLote(contexto, tabela, [{ id: pendencia.registroId, ...pendencia.payload }], {
+                parcial: true,
+            });
             this.emissor.emitir('registro:alterado', {
                 tabela: tabela.nome,
                 id: pendencia.registroId,

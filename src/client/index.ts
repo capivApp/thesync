@@ -46,6 +46,7 @@ export {
     listarIds,
     listarRegistros,
     type FiltroLocal,
+    type OpcoesDeGravacao,
     type RegistroLocal,
 } from './persistencia/registros';
 
