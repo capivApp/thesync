@@ -130,6 +130,14 @@ export interface ResultadoPuxada {
     completo: boolean;
     /** Ainda há páginas; o motor chama de novo. */
     temMais: boolean;
+    /**
+     * Zera a marca d'água: a carga precisa ser refeita do começo.
+     *
+     * Acontece quando o servidor podou o change log além do nosso cursor —
+     * não há incremental possível, e fingir que há deixaria o espelho
+     * permanentemente desatualizado sem ninguém perceber.
+     */
+    recomecar?: boolean;
 }
 
 export interface EstrategiaPuxada {

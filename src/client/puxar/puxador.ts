@@ -49,6 +49,19 @@ export const puxarTabela = async (
             sinal,
         });
 
+        // O servidor podou o log além do nosso cursor: a próxima rodada refaz a
+        // carga inicial. Não grava nada agora para não misturar meio-estado.
+        if (resultado.recomecar) {
+            await gravarEstado(contexto, {
+                ...estado,
+                cursor: null,
+                cursorPagina: null,
+                cargaCompletaEm: null,
+                ultimoErro: 'O servidor exigiu recarga completa.',
+            });
+            break;
+        }
+
         gravados += await gravarLote(contexto, tabela, resultado.registros);
 
         if (resultado.completo) {

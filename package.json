@@ -1,6 +1,6 @@
 {
   "name": "@capivapp/thesync",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Motor de sincronização offline-first: espelho local, fila de escritas e anexos para Expo, com o lado servidor para Express + Prisma.",
   "license": "MIT",
   "repository": {
