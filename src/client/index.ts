@@ -33,6 +33,7 @@ export type {
 export { Emissor } from './nucleo/eventos';
 export type { EventosSync, NomeEvento, Ouvinte } from './nucleo/eventos';
 
+export { comAlternativa, type OpcoesComAlternativa } from './puxar/estrategias/comAlternativa';
 export { porChangeLog, type OpcoesPorChangeLog } from './puxar/estrategias/porChangeLog';
 export { porListaCompleta } from './puxar/estrategias/porListaCompleta';
 export { viaAgregado } from './puxar/estrategias/viaAgregado';
