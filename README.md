@@ -62,7 +62,7 @@ onde escrever, como reconciliar exclusões e o que fazer quando dois aparelhos
 editam a mesma coisa.
 
 ```ts
-import { definirTabela } from '@capivapp/thesync/client';
+import { definirTabela, porChangeLog } from '@capivapp/thesync/client';
 
 export const inventarioItem = definirTabela({
   nome: 'inventario_item',
@@ -70,12 +70,12 @@ export const inventarioItem = definirTabela({
   chavePrimaria: 'id',
 
   leitura: {
-    rotaLista: '/patrimonio/api/v1/inventario-patrimonio-itens',
-    // O GET do inventário já devolve o conjunto COMPLETO de itens.
-    // Ele É a reconciliação — não invente delta onde já existe conjunto.
-    reconciliacao: viaAgregado({
-      rota: (ctx) => `/patrimonio/api/v1/inventario-patrimonio/${ctx.escopo}`,
-      extrair: (resposta) => resposta.data?.invetario_patrimonio_itens ?? [],
+    // Incremental: pede o que mudou desde o cursor, exclusões incluídas.
+    // Trocar por porListaCompleta() ou viaAgregado() é uma linha — nem o
+    // motor nem as telas sabem de onde o dado veio.
+    estrategia: porChangeLog({
+      rotaBase: '/patrimonio/api/v1/inventario-patrimonio-itens',
+      filtros: (escopo) => ({ inventarioId: escopo }),
     }),
   },
 
@@ -228,3 +228,7 @@ bun run typecheck
 - **Deduplicação de anexo em retry tardio não é resolvível só no cliente.**
   Precisa do lado servidor (chave derivada do conteúdo). Está em
   `@capivapp/thesync/server`.
+- **`porChangeLog` exige PostgreSQL 13+** no servidor (`xid8`,
+  `pg_visible_in_snapshot`). Sem ele, use `porListaCompleta` ou `viaAgregado`,
+  que funcionam com qualquer backend — a troca é uma linha na declaração da
+  tabela.
