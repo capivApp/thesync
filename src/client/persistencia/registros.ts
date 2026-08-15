@@ -41,6 +41,25 @@ const paraRegistro = <T>(linha: LinhaRegistro): RegistroLocal<T> => ({
     excluido: linha.excluido === 1,
 });
 
+/**
+ * Trava contra parâmetro posicional fora de ordem em SQL montado.
+ *
+ * Um `?` a mais ou a menos o SQLite acusa; a ORDEM trocada ele aceita em
+ * silêncio — casa os valores nas posições erradas, a consulta não encontra
+ * nada e a tela fica vazia como se não houvesse dado. Foi assim que o
+ * inventário apareceu sem itens. A contagem não pega troca entre dois
+ * parâmetros do mesmo tipo, mas pega o caso que realmente acontece: alguém
+ * acrescentar uma condição e esquecer de empilhar o valor no lugar certo.
+ */
+const conferirParametros = (sql: string, parametros: unknown[]): void => {
+    const esperados = (sql.match(/\?/g) ?? []).length;
+    if (esperados === parametros.length) return;
+    throw new Error(
+        `[thesync] SQL com ${esperados} parâmetros e ${parametros.length} valores. ` +
+        `Eles são posicionais: monte os valores na ordem em que os "?" aparecem.`,
+    );
+};
+
 const idDoRegistro = (tabela: DefinicaoTabela, bruto: any): string | null => {
     const id = tabela.leitura.extrairId ? tabela.leitura.extrairId(bruto) : bruto?.[tabela.chavePrimaria];
     return typeof id === 'string' && id.length > 0 ? id : null;
@@ -157,17 +176,29 @@ export const listarRegistros = async <T>(
     filtro: FiltroLocal = {},
 ): Promise<RegistroLocal<T>[]> => {
     const banco = await bancoDaEntidade(contexto.entidade);
-    const condicoes = ['r.entidade = ?', 'r.tabela = ?'];
-    const parametros: (string | number)[] = [contexto.entidade, tabela];
-
-    if (!filtro.incluirExcluidos) condicoes.push('r.excluido = 0');
+    /**
+     * Os parâmetros são POSICIONAIS: eles precisam ser montados na mesma ordem
+     * em que os `?` aparecem no SQL. O `?` da junção vem ANTES dos do `WHERE`,
+     * então ele é empilhado primeiro.
+     *
+     * Isto já esteve errado e não deu erro nenhum: o SQLite apenas casou os
+     * valores nas posições trocadas, a consulta não encontrou nada e a tela
+     * ficou vazia como se o inventário não tivesse itens. Por isso a montagem
+     * agora acompanha a leitura do SQL, de cima para baixo.
+     */
+    const parametros: (string | number)[] = [];
 
     const junta = filtro.coluna
         ? `JOIN indice_registros i
              ON i.entidade = r.entidade AND i.tabela = r.tabela
             AND i.id = r.id AND i.coluna = ?`
         : '';
-    if (filtro.coluna) parametros.splice(2, 0, filtro.coluna);
+    if (filtro.coluna) parametros.push(filtro.coluna);
+
+    const condicoes = ['r.entidade = ?', 'r.tabela = ?'];
+    parametros.push(contexto.entidade, tabela);
+
+    if (!filtro.incluirExcluidos) condicoes.push('r.excluido = 0');
 
     if (filtro.coluna && filtro.igualA !== undefined) {
         condicoes.push(typeof filtro.igualA === 'number' ? 'i.valor_num = ?' : 'i.valor_texto = ?');
@@ -175,12 +206,13 @@ export const listarRegistros = async <T>(
     }
 
     const limite = filtro.limite ? ` LIMIT ${Number(filtro.limite)}` : '';
-    const linhas = await banco.getAllAsync<LinhaRegistro>(
-        `SELECT r.id, r.dados, r.updated_at, r.origem, r.excluido
+    const sql = `SELECT r.id, r.dados, r.updated_at, r.origem, r.excluido
        FROM registros r ${junta}
-      WHERE ${condicoes.join(' AND ')}${limite};`,
-        parametros,
-    );
+      WHERE ${condicoes.join(' AND ')}${limite};`;
+
+    conferirParametros(sql, parametros);
+
+    const linhas = await banco.getAllAsync<LinhaRegistro>(sql, parametros);
 
     return linhas.map((linha) => paraRegistro<T>(linha));
 };
