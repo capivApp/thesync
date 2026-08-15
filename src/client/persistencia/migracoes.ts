@@ -161,6 +161,19 @@ export const MIGRACOES: Migracao[] = [
         ON mapa_ids (tabela, id_servidor);
     `,
     },
+    {
+        versao: 4,
+        sql: `
+      -- Versão que o usuário estava vendo quando editou.
+      --
+      -- Vai no If-Match e é o que permite ao servidor recusar a gravação por
+      -- cima de uma alteração que este cliente não chegou a ver. Antes disso a
+      -- fila guardava só o timestamp, que não serve: ele é preenchido pelo
+      -- cliente do ORM no servidor, convive com escrita crua usando o relógio
+      -- do banco, e duas escritas no mesmo milissegundo são indistinguíveis.
+      ALTER TABLE saida ADD COLUMN base_version INTEGER;
+    `,
+    },
 ];
 
 export const VERSAO_ALVO = MIGRACOES.reduce((maior, migracao) => Math.max(maior, migracao.versao), 0);

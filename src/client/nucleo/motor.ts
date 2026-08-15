@@ -6,6 +6,8 @@
  * envio em segundo plano depois sem reescrever nada: uma tarefa headless chama
  * `drenar()` exatamente como a UI chama.
  */
+import { randomUUID } from 'expo-crypto';
+
 import type { Transporte } from '../../protocol/transporte';
 import { FilaDeAnexos } from '../anexos/filaAnexos';
 import { guardarArquivo, novoIdDeAnexo } from '../anexos/arquivos';
@@ -16,7 +18,7 @@ import {
     jaEnfileirado,
     recuperarAnexosEmVoo,
 } from '../persistencia/anexos';
-import { lerRegistro } from '../persistencia/registros';
+import { gravarLote, lerRegistro } from '../persistencia/registros';
 import {
     contarPendencias,
     enfileirar,
@@ -136,7 +138,8 @@ export class Motor {
      * na hora do envio, que outra pessoa mexeu no registro nesse meio-tempo.
      */
     async enfileirar(contexto: ContextoSync, escrita: EscritaSolicitada): Promise<Pendencia> {
-        const atual = await lerRegistro(contexto, escrita.tabela, escrita.id);
+        const atual = await lerRegistro<Record<string, unknown>>(contexto, escrita.tabela, escrita.id);
+        const versao = atual?.dados?.version;
 
         return enfileirar(contexto, {
             tabela: escrita.tabela,
@@ -145,7 +148,53 @@ export class Motor {
             payload: escrita.campos,
             camposAlterados: Object.keys(escrita.campos),
             baseUpdatedAt: atual?.updatedAt ?? null,
+            baseVersion: typeof versao === 'number' ? versao : null,
         });
+    }
+
+    /**
+     * Cria um registro offline, com o id decidido AQUI.
+     *
+     * O id do cliente é o que dispensa a tabela de remapeamento: sem ele, todo
+     * registro criado sem rede ganharia um id provisório que precisaria ser
+     * trocado, depois, em cada referência já enfileirada. E como criar e
+     * retentar viram a mesma chamada, reenviar uma criação cujo resultado o app
+     * não recebeu deixa de ser perigoso.
+     *
+     * Exige que a tabela declare `estrategiaId: 'id-do-cliente'` — nas outras,
+     * o servidor é quem decide o id e criar offline não é seguro.
+     */
+    async criar(
+        contexto: ContextoSync,
+        criacao: { tabela: string; campos: Record<string, unknown> },
+    ): Promise<{ id: string; pendencia: Pendencia }> {
+        const tabela = this.registro.obter(criacao.tabela);
+
+        if (tabela.escrita?.estrategiaId !== 'id-do-cliente') {
+            throw new Error(
+                `A tabela "${tabela.nome}" não permite criação offline: o id é decidido pelo servidor.`,
+            );
+        }
+
+        const id = randomUUID();
+        const registro = { ...criacao.campos, [tabela.chavePrimaria]: id };
+
+        // O registro entra no espelho como 'local' para a tela já enxergá-lo,
+        // mesmo antes de o servidor conhecê-lo.
+        await gravarLote(contexto, tabela, [registro], 'local');
+
+        const pendencia = await enfileirar(contexto, {
+            tabela: criacao.tabela,
+            registroId: id,
+            operacao: 'criar',
+            payload: registro,
+            camposAlterados: Object.keys(registro),
+        });
+
+        this.emissor.emitir('registro:alterado', { tabela: tabela.nome, id, registro });
+        await this.publicarEstadoDaFila(contexto);
+
+        return { id, pendencia };
     }
 
     /**

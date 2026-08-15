@@ -136,7 +136,11 @@ export class Empurrador {
             await this.transporte.escrever({
                 ...requisicao,
                 chaveIdempotencia: pendencia.id,
-                versaoEsperada: pendencia.baseUpdatedAt ?? undefined,
+                // Só manda `If-Match` quando sabemos a versão que o usuário
+                // estava vendo. Sem ela o servidor mantém o comportamento
+                // antigo — é o que permite adotar a checagem aos poucos.
+                versaoEsperada:
+                    pendencia.baseVersion === null ? undefined : String(pendencia.baseVersion),
             });
             await this.aplicarSucesso(contexto, tabela, pendencia);
             return 'enviada';

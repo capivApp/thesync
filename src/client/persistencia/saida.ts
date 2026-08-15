@@ -26,6 +26,8 @@ export interface Pendencia {
     payload: Record<string, unknown>;
     camposAlterados: string[];
     baseUpdatedAt: string | null;
+    /** Versão do registro no momento da edição. Vai no If-Match. */
+    baseVersion: number | null;
     dependeDe: string[];
     estado: EstadoPendencia;
     tentativas: number;
@@ -46,6 +48,7 @@ interface LinhaSaida {
     payload: string;
     campos_alterados: string;
     base_updated_at: string | null;
+    base_version: number | null;
     depende_de: string | null;
     estado: string;
     tentativas: number;
@@ -63,6 +66,7 @@ export interface NovaPendencia {
     payload: Record<string, unknown>;
     camposAlterados?: string[];
     baseUpdatedAt?: string | null;
+    baseVersion?: number | null;
     dependeDe?: string[];
 }
 
@@ -76,6 +80,7 @@ const paraPendencia = (linha: LinhaSaida): Pendencia => ({
     payload: JSON.parse(linha.payload) as Record<string, unknown>,
     camposAlterados: JSON.parse(linha.campos_alterados) as string[],
     baseUpdatedAt: linha.base_updated_at,
+    baseVersion: linha.base_version,
     dependeDe: linha.depende_de ? (JSON.parse(linha.depende_de) as string[]) : [],
     estado: linha.estado as EstadoPendencia,
     tentativas: linha.tentativas,
@@ -161,6 +166,7 @@ export const enfileirar = async (
         payload: nova.payload,
         camposAlterados: nova.camposAlterados ?? Object.keys(nova.payload),
         baseUpdatedAt: nova.baseUpdatedAt ?? null,
+        baseVersion: nova.baseVersion ?? null,
         dependeDe: nova.dependeDe ?? [],
         estado: 'pendente',
         tentativas: 0,
@@ -174,9 +180,9 @@ export const enfileirar = async (
     await banco.runAsync(
         `INSERT INTO saida
        (id, sequencia, entidade, tabela, registro_id, operacao, payload, campos_alterados,
-        base_updated_at, depende_de, estado, tentativas, proxima_tentativa_em,
+        base_updated_at, base_version, depende_de, estado, tentativas, proxima_tentativa_em,
         ultimo_erro, ultimo_status_http, criado_em, atualizado_em)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente', 0, 0, NULL, NULL, ?, ?);`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente', 0, 0, NULL, NULL, ?, ?);`,
         [
             pendencia.id,
             pendencia.sequencia,
@@ -187,6 +193,7 @@ export const enfileirar = async (
             JSON.stringify(pendencia.payload),
             JSON.stringify(pendencia.camposAlterados),
             pendencia.baseUpdatedAt,
+            pendencia.baseVersion,
             JSON.stringify(pendencia.dependeDe),
             pendencia.criadoEm,
             pendencia.atualizadoEm,
