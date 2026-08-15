@@ -104,9 +104,10 @@ export const porChangeLog = (opcoes: OpcoesPorChangeLog): EstrategiaPuxada => {
                 return {
                     registros: pagina.items,
                     excluidos: [],
-                    // Só o conjunto COMPLETO reconcilia exclusões, e ele só
-                    // está completo quando a última página chega.
-                    completo: !pagina.hasMore && !estado.cursorPagina,
+                    // Cada página do snapshot faz parte da varredura completa.
+                    // Se ela pode ou não reconciliar exclusões é o puxador quem
+                    // decide, olhando se a rodada começou do começo.
+                    completo: true,
                     cursor: cursorZero,
                     cursorPagina: pagina.nextId,
                     temMais: pagina.hasMore,

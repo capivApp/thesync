@@ -64,6 +64,16 @@ export const puxarTabela = async (
     const idsCompletos: string[] = [];
     let vistoConjuntoCompleto = false;
 
+    /**
+     * A rodada retomou uma carga interrompida?
+     *
+     * Importa porque a varredura só serve de base para reconciliar exclusões
+     * quando ela cobriu o conjunto INTEIRO. Retomando da página 7, as seis
+     * primeiras não passam por aqui — e reconciliar assim mesmo apagaria do
+     * espelho tudo que veio nelas.
+     */
+    const comecouDoZero = !estado.cursorPagina;
+
     for (let pagina = 0; pagina < MAX_PAGINAS; pagina += 1) {
         const resultado = await tabela.leitura.estrategia.puxar({
             tabela,
@@ -113,9 +123,17 @@ export const puxarTabela = async (
         }
     }
 
-    // O que o servidor não listou num conjunto completo, não existe mais. É
-    // assim que a exclusão aparece enquanto o backend não manda tombstone.
-    if (vistoConjuntoCompleto) {
+    /**
+     * O que o servidor não listou numa varredura completa não existe mais. É
+     * assim que a exclusão aparece enquanto o backend não manda tombstone.
+     *
+     * As três condições são obrigatórias juntas: a estratégia precisa ter
+     * declarado varredura completa, a rodada precisa ter começado da primeira
+     * página e precisa ter chegado à última. Faltando qualquer uma, o conjunto
+     * em mãos é PARCIAL, e reconciliar contra um parcial não corrige espelho
+     * nenhum — esvazia o espelho.
+     */
+    if (vistoConjuntoCompleto && comecouDoZero && concluiuAPaginacao) {
         const sumidos = await reconciliarConjunto(contexto, tabela.nome, idsCompletos);
         excluidos += sumidos.length;
         sumidos.forEach((id) => emissor.emitir('registro:excluido', { tabela: tabela.nome, id }));

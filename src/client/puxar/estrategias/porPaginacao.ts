@@ -46,8 +46,17 @@ export const porPaginacao = (opcoes: OpcoesPorPaginacao): EstrategiaPuxada => {
             return {
                 registros: resposta.registros,
                 excluidos: [],
-                // O conjunto só está completo quando a última página chega.
-                completo: !temMais,
+                /**
+                 * TODA página faz parte da varredura completa, não só a última.
+                 *
+                 * Marcar apenas a última fazia o puxador reconciliar contra ela
+                 * sozinha e dar por excluído tudo que veio antes — o espelho de
+                 * um cadastro de mil registros terminaria com os poucos da
+                 * página final. Quem decide se a varredura serve para
+                 * reconciliar é o puxador, que sabe se a rodada começou na
+                 * primeira página.
+                 */
+                completo: true,
                 cursorPagina: temMais ? String(proxima) : null,
                 temMais,
             };
