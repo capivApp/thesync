@@ -135,14 +135,34 @@ gasta uma tentativa — e é o erro mais comum de fila offline. Cinco minutos de
 túnel não podem queimar o limite de tentativas e fazer a tela mentir que a
 contagem falhou.
 
-### 5. Lado servidor
+### 5. Cadastro offline
+
+```ts
+// O id é decidido AQUI. Sem isso, cada registro criado sem rede ganharia um id
+// provisório que precisaria ser trocado depois em toda referência enfileirada.
+const { id } = await motor.criar(contexto, {
+  tabela: 'localizacao',
+  campos: { name: 'Almoxarifado central' },
+});
+```
+
+Só funciona em tabela que declara `estrategiaId: 'id-do-cliente'` e cuja rota
+de escrita aponte para o endpoint de upsert do servidor. Nas demais, quem
+decide o id é o servidor e criar offline não seria seguro.
+
+### 6. Lado servidor
 
 ```ts
 import { rotasDeSync, changeLog } from '@capivapp/thesync/server';
 ```
 
-Gera `GET .../sync/changes` e `GET .../sync/snapshot` para cada recurso, sobre
-um change log alimentado por trigger. Veja [docs/protocolo.md](docs/protocolo.md).
+Change log alimentado por trigger, idempotência durável, anexo idempotente por
+hash de conteúdo e compare-and-swap por versão.
+
+As rotas `/sync/*` são **exclusivas do app**: qualquer chamada com `Origin` ou
+`Referer` é recusada, porque um `fetch` de página sempre carrega esse header
+quando é cross-origin e a especificação impede o JavaScript de removê-lo. Veja
+[docs/protocolo.md](docs/protocolo.md).
 
 ---
 

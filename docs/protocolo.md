@@ -156,6 +156,43 @@ existência dos triggers em `pg_trigger` depois do bootstrap.
 
 ---
 
+## As rotas `/sync/*` são exclusivas do app
+
+Elas aceitam id escolhido pelo cliente e devolvem registros desabilitados
+(tombstones), que o contrato da API web esconde de propósito. O frontend web
+nunca deve alcançá-las.
+
+A barreira que vale é o **`Origin`**. Um `fetch` disparado de uma página sempre
+o carrega quando é cross-origin, e a especificação marca esse header como
+*forbidden* — JavaScript de página não consegue removê-lo nem falsificá-lo. O
+React Native não é navegador e simplesmente não manda origem.
+
+```
+Origin ou Referer presentes  ⇒  403
+x-client-type ≠ native       ⇒  403
+```
+
+O `x-client-type: native` é a declaração explícita do cliente. Sozinho seria
+forjável por qualquer um com curl; junto com a checagem de origem, ele torna a
+intenção visível e pega chamada errada em desenvolvimento.
+
+O que isto **não** é: barreira contra um atacante com token válido e curl.
+Contra isso valem as camadas de sempre — permissões, autenticação e o RLS por
+entidade, todos aplicados antes.
+
+### `PUT <recurso>/sync/:id`
+
+Cria **ou** atualiza com o id que o cliente escolheu. É o que permite cadastrar
+offline: sem ela, o app precisaria de uma tabela de remapeamento para trocar o
+id local pelo do servidor em toda referência já enfileirada.
+
+De quebra, criar e retentar viram a mesma chamada — reenviar uma criação cujo
+resultado o app não recebeu deixa de ser perigoso.
+
+Opt-in por recurso: só faz sentido onde o app realmente cria sem rede.
+
+---
+
 ## Escrita
 
 Toda escrita leva `x-idempotency-key` — a mesma em todas as tentativas da mesma
