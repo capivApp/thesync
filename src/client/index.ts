@@ -36,6 +36,7 @@ export type { EventosSync, NomeEvento, Ouvinte } from './nucleo/eventos';
 export { comAlternativa, type OpcoesComAlternativa } from './puxar/estrategias/comAlternativa';
 export { porChangeLog, type OpcoesPorChangeLog } from './puxar/estrategias/porChangeLog';
 export { porListaCompleta } from './puxar/estrategias/porListaCompleta';
+export { porPaginacao, type OpcoesPorPaginacao } from './puxar/estrategias/porPaginacao';
 export { viaAgregado } from './puxar/estrategias/viaAgregado';
 
 export {
@@ -51,7 +52,7 @@ export {
 export { listarPendencias, type EstadoPendencia, type Pendencia } from './persistencia/saida';
 export { listarAnexos, type Anexo, type EstadoAnexo } from './persistencia/anexos';
 export { apagarDadosDaEntidade, fecharBancos } from './persistencia/banco';
-export { temCargaCompleta } from './persistencia/marcaDagua';
+export { lerEstado, temCargaCompleta } from './persistencia/marcaDagua';
 
 export { espacoDisponivel, espacoOcupado } from './anexos/arquivos';
 export { conferirConectividade, estaOnline, monitorarConectividade } from './rede/conectividade';
