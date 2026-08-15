@@ -42,16 +42,41 @@
     "react": ">=18"
   },
   "peerDependenciesMeta": {
-    "@prisma/client": { "optional": true },
-    "@tanstack/react-query": { "optional": true },
-    "expo-crypto": { "optional": true },
-    "expo-file-system": { "optional": true },
-    "expo-network": { "optional": true },
-    "expo-sqlite": { "optional": true },
-    "express": { "optional": true },
-    "react": { "optional": true }
+    "@prisma/client": {
+      "optional": true
+    },
+    "@tanstack/react-query": {
+      "optional": true
+    },
+    "expo-crypto": {
+      "optional": true
+    },
+    "expo-file-system": {
+      "optional": true
+    },
+    "expo-network": {
+      "optional": true
+    },
+    "expo-sqlite": {
+      "optional": true
+    },
+    "express": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/react": "~19.1.10",
+    "expo": "^54.0.0",
+    "expo-crypto": "~15.0.7",
+    "expo-file-system": "~19.0.23",
+    "expo-network": "~8.0.8",
+    "expo-sqlite": "~16.0.8",
+    "react": "^19.1.4",
+    "react-native": "^0.81.5",
     "typescript": "~5.9.3"
   }
 }

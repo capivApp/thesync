@@ -1,0 +1,100 @@
+/**
+ * Traz o que mudou no servidor para o espelho local.
+ *
+ * O puxador não sabe COMO buscar — isso é da estratégia declarada na tabela.
+ * Ele sabe o que fazer com o resultado: gravar em lote, reconciliar exclusões
+ * quando o conjunto veio completo, avançar a marca d'água e avisar quem escuta.
+ */
+import { Emissor } from '../nucleo/eventos';
+import type { ContextoSync, DefinicaoTabela } from '../nucleo/tipos';
+import type { Transporte } from '../../protocol/transporte';
+import { gravarLote, marcarExcluidos, reconciliarConjunto } from '../persistencia/registros';
+import { gravarEstado, lerEstado } from '../persistencia/marcaDagua';
+
+/** Teto de páginas por rodada — evita laço infinito se o servidor mentir no `temMais`. */
+const MAX_PAGINAS = 200;
+
+export interface ResultadoSincronizacaoTabela {
+    tabela: string;
+    gravados: number;
+    excluidos: number;
+}
+
+const idsDe = (tabela: DefinicaoTabela, registros: unknown[]): string[] =>
+    registros
+        .map((bruto: any) =>
+            tabela.leitura.extrairId ? tabela.leitura.extrairId(bruto) : bruto?.[tabela.chavePrimaria],
+        )
+        .filter((id): id is string => typeof id === 'string' && id.length > 0);
+
+export const puxarTabela = async (
+    contexto: ContextoSync,
+    tabela: DefinicaoTabela,
+    transporte: Transporte,
+    emissor: Emissor,
+    sinal?: AbortSignal,
+): Promise<ResultadoSincronizacaoTabela> => {
+    let estado = await lerEstado(contexto, tabela.nome);
+    let gravados = 0;
+    let excluidos = 0;
+    const idsCompletos: string[] = [];
+    let vistoConjuntoCompleto = false;
+
+    for (let pagina = 0; pagina < MAX_PAGINAS; pagina += 1) {
+        const resultado = await tabela.leitura.estrategia.puxar({
+            tabela,
+            contexto,
+            transporte,
+            estado,
+            sinal,
+        });
+
+        gravados += await gravarLote(contexto, tabela, resultado.registros);
+
+        if (resultado.completo) {
+            vistoConjuntoCompleto = true;
+            idsCompletos.push(...idsDe(tabela, resultado.registros));
+        }
+
+        if (resultado.excluidos.length > 0) {
+            excluidos += await marcarExcluidos(contexto, tabela.nome, resultado.excluidos);
+        }
+
+        // A página é gravada ANTES do estado avançar: se o app morrer agora, a
+        // próxima abertura retoma daqui em vez de recomeçar.
+        estado = {
+            ...estado,
+            cursor: resultado.cursor !== undefined ? resultado.cursor : estado.cursor,
+            cursorPagina: resultado.temMais ? (resultado.cursorPagina ?? null) : null,
+            ultimoErro: null,
+        };
+        await gravarEstado(contexto, estado);
+
+        if (!resultado.temMais) break;
+    }
+
+    // O que o servidor não listou num conjunto completo, não existe mais. É
+    // assim que a exclusão aparece enquanto o backend não manda tombstone.
+    if (vistoConjuntoCompleto) {
+        const sumidos = await reconciliarConjunto(contexto, tabela.nome, idsCompletos);
+        excluidos += sumidos.length;
+        sumidos.forEach((id) => emissor.emitir('registro:excluido', { tabela: tabela.nome, id }));
+    }
+
+    const agora = Date.now();
+    await gravarEstado(contexto, {
+        ...estado,
+        cargaCompletaEm: estado.cargaCompletaEm ?? agora,
+        reconciliadoEm: vistoConjuntoCompleto ? agora : estado.reconciliadoEm,
+        cursorPagina: null,
+    });
+
+    emissor.emitir('tabela:sincronizada', {
+        tabela: tabela.nome,
+        escopo: contexto.escopo,
+        gravados,
+        excluidos,
+    });
+
+    return { tabela: tabela.nome, gravados, excluidos };
+};
