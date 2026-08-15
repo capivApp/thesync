@@ -8,7 +8,12 @@
 import { Emissor } from '../nucleo/eventos';
 import type { ContextoSync, DefinicaoTabela } from '../nucleo/tipos';
 import type { Transporte } from '../../protocol/transporte';
-import { gravarLote, marcarExcluidos, reconciliarConjunto } from '../persistencia/registros';
+import {
+    contarRegistros,
+    gravarLote,
+    marcarExcluidos,
+    reconciliarConjunto,
+} from '../persistencia/registros';
 import { gravarEstado, lerEstado } from '../persistencia/marcaDagua';
 
 /** Teto de páginas por rodada — evita laço infinito se o servidor mentir no `temMais`. */
@@ -35,7 +40,26 @@ export const puxarTabela = async (
     sinal?: AbortSignal,
 ): Promise<ResultadoSincronizacaoTabela> => {
     let estado = await lerEstado(contexto, tabela.nome);
+
+    /**
+     * Autocorreção: marca de carga completa com o espelho VAZIO.
+     *
+     * Se a carga inicial for interrompida no meio depois de já ter marcado a
+     * conclusão, toda rodada seguinte entra no caminho incremental — pede só o
+     * que mudou desde o cursor, não vem nada, e a tabela fica vazia para
+     * sempre, sem erro nenhum. Aqui a marca é desfeita para a carga ser
+     * refeita do começo.
+     */
+    if (estado.cargaCompletaEm && (await contarRegistros(contexto, tabela.nome)) === 0) {
+        console.warn(
+            `[thesync] "${tabela.nome}" marcada como carregada mas sem registros; refazendo a carga.`,
+        );
+        estado = { ...estado, cargaCompletaEm: null, cursor: null, cursorPagina: null };
+        await gravarEstado(contexto, estado);
+    }
+
     let gravados = 0;
+    let concluiuAPaginacao = false;
     let excluidos = 0;
     const idsCompletos: string[] = [];
     let vistoConjuntoCompleto = false;
@@ -83,7 +107,10 @@ export const puxarTabela = async (
         };
         await gravarEstado(contexto, estado);
 
-        if (!resultado.temMais) break;
+        if (!resultado.temMais) {
+            concluiuAPaginacao = true;
+            break;
+        }
     }
 
     // O que o servidor não listou num conjunto completo, não existe mais. É
@@ -97,10 +124,20 @@ export const puxarTabela = async (
     const agora = Date.now();
     await gravarEstado(contexto, {
         ...estado,
-        cargaCompletaEm: estado.cargaCompletaEm ?? agora,
+        /**
+         * Só marca como carregada quando a paginação REALMENTE terminou. Marcar
+         * no fim de qualquer rodada fazia uma carga interrompida passar por
+         * concluída, e a tabela nunca mais era baixada por inteiro.
+         */
+        cargaCompletaEm: estado.cargaCompletaEm ?? (concluiuAPaginacao ? agora : null),
         reconciliadoEm: vistoConjuntoCompleto ? agora : estado.reconciliadoEm,
-        cursorPagina: null,
+        cursorPagina: concluiuAPaginacao ? null : estado.cursorPagina,
     });
+
+    console.log(
+        `[thesync] ${tabela.nome}: ${gravados} gravados, ${excluidos} excluídos` +
+        `${concluiuAPaginacao ? '' : ' (paginação incompleta)'}`,
+    );
 
     emissor.emitir('tabela:sincronizada', {
         tabela: tabela.nome,

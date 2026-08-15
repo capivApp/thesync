@@ -217,6 +217,20 @@ export const listarRegistros = async <T>(
     return linhas.map((linha) => paraRegistro<T>(linha));
 };
 
+/** Quantos registros a tabela tem no espelho. Barato: só conta. */
+export const contarRegistros = async (
+    contexto: ContextoSync,
+    tabela: string,
+): Promise<number> => {
+    const banco = await bancoDaEntidade(contexto.entidade);
+    const linha = await banco.getFirstAsync<{ total: number }>(
+        `SELECT COUNT(*) AS total FROM registros
+      WHERE entidade = ? AND tabela = ? AND excluido = 0;`,
+        [contexto.entidade, tabela],
+    );
+    return linha?.total ?? 0;
+};
+
 export const listarIds = async (
     contexto: ContextoSync,
     tabela: string,

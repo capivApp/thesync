@@ -40,6 +40,7 @@ export { viaAgregado } from './puxar/estrategias/viaAgregado';
 
 export {
     contarPor,
+    contarRegistros,
     lerRegistro,
     listarIds,
     listarRegistros,
