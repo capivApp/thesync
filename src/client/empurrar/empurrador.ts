@@ -41,7 +41,16 @@ export interface ResultadoDrenagem {
     interrompidaPor: 'fim' | 'rede' | 'sessao' | 'orcamento';
 }
 
-type Desfecho = 'enviada' | 'falhou' | 'parar';
+/**
+ * As DUAS paradas são distintas de propósito.
+ *
+ * Elas param a fila igual, mas pedem coisas OPOSTAS do usuário: `parar-rede` se
+ * resolve sozinha quando o sinal volta; `parar-sessao` só se resolve com
+ * alguém entrando de novo. Colapsar as duas em "rede" fazia o app anunciar
+ * "Sem conexão" para quem estava com sinal cheio, e a contagem do dia ficava
+ * parada esperando uma reconexão que já tinha acontecido.
+ */
+type Desfecho = 'enviada' | 'falhou' | 'parar-rede' | 'parar-sessao';
 
 const requisicaoDe = (
     tabela: DefinicaoTabela,
@@ -167,7 +176,8 @@ export class Empurrador {
                 });
             }
 
-            return interrompeAFila(falha) ? 'parar' : 'falhou';
+            if (!interrompeAFila(falha)) return 'falhou';
+            return falha.tipo === 'autenticacao' ? 'parar-sessao' : 'parar-rede';
         }
     }
 
@@ -193,8 +203,8 @@ export class Empurrador {
             const desfecho = await this.processar(contexto, pendencia);
             if (desfecho === 'enviada') enviadas += 1;
             if (desfecho === 'falhou') falhas += 1;
-            if (desfecho === 'parar') {
-                interrompidaPor = 'rede';
+            if (desfecho === 'parar-rede' || desfecho === 'parar-sessao') {
+                interrompidaPor = desfecho === 'parar-sessao' ? 'sessao' : 'rede';
                 break;
             }
 

@@ -34,7 +34,7 @@ export interface ResultadoDrenagemAnexos {
     enviados: number;
     falhas: number;
     restantes: number;
-    interrompidaPor: 'fim' | 'rede' | 'orcamento';
+    interrompidaPor: 'fim' | 'rede' | 'sessao' | 'orcamento';
 }
 
 export class FilaDeAnexos {
@@ -53,7 +53,10 @@ export class FilaDeAnexos {
         return local?.dados ?? null;
     }
 
-    private async enviar(contexto: ContextoSync, anexo: Anexo): Promise<'enviado' | 'falhou' | 'parar'> {
+    private async enviar(
+        contexto: ContextoSync,
+        anexo: Anexo,
+    ): Promise<'enviado' | 'falhou' | 'parar-rede' | 'parar-sessao'> {
         const atual = this.transporte.entidadeAtual();
         if (atual === null || atual !== anexo.entidade) {
             await registrarFalhaAnexo(contexto, {
@@ -149,7 +152,10 @@ export class FilaDeAnexos {
                 });
             }
 
-            return interrompeAFila(falha) ? 'parar' : 'falhou';
+            // Sessão recusada não é queda de rede: uma volta sozinha, a
+            // outra exige alguém entrar de novo.
+            if (!interrompeAFila(falha)) return 'falhou';
+            return falha.tipo === 'autenticacao' ? 'parar-sessao' : 'parar-rede';
         }
     }
 
@@ -185,8 +191,8 @@ export class FilaDeAnexos {
             const desfecho = await this.enviar(contexto, anexo);
             if (desfecho === 'enviado') enviados += 1;
             if (desfecho === 'falhou') falhas += 1;
-            if (desfecho === 'parar') {
-                interrompidaPor = 'rede';
+            if (desfecho === 'parar-rede' || desfecho === 'parar-sessao') {
+                interrompidaPor = desfecho === 'parar-sessao' ? 'sessao' : 'rede';
                 break;
             }
 
