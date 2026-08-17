@@ -13,6 +13,17 @@ export interface EventosSync {
     'registro:excluido': { tabela: string; id: string };
     /** Um lote de registros chegou (carga inicial, reconciliação). */
     'tabela:sincronizada': { tabela: string; escopo: string; gravados: number; excluidos: number };
+    /**
+     * Uma página da carga entrou no espelho, para a tela poder dizer
+     * "12.400 de 103.000" em vez de um spinner que não distingue baixando de
+     * travado. Numa tabela de cem mil registros a carga leva dezenas de
+     * minutos, e sem número na tela o usuário mata o app achando que morreu.
+     *
+     * `total` é `null` quando a estratégia não sabe o tamanho do conjunto — o
+     * feed incremental não conta o que ainda não entregou. Aí a tela mostra o
+     * que já veio, sem barra.
+     */
+    'carga:progresso': { tabela: string; escopo: string; baixados: number; total: number | null };
     /** Progresso da drenagem, para a tela poder dizer "enviando 42 de 300". */
     'fila:progresso': { enviadas: number; total: number; anexos: number };
     /** A fila mudou de tamanho ou de composição. */

@@ -59,6 +59,9 @@ export const porPaginacao = (opcoes: OpcoesPorPaginacao): EstrategiaPuxada => {
                 completo: true,
                 cursorPagina: temMais ? String(proxima) : null,
                 temMais,
+                // O envelope da listagem já traz o tamanho do conjunto; é o que
+                // deixa a tela dizer quanto falta em vez de só quanto já veio.
+                total: resposta.paginacao?.total ?? null,
             };
         },
     };

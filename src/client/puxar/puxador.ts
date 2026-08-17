@@ -16,8 +16,17 @@ import {
 } from '../persistencia/registros';
 import { gravarEstado, lerEstado } from '../persistencia/marcaDagua';
 
-/** Teto de páginas por rodada — evita laço infinito se o servidor mentir no `temMais`. */
-const MAX_PAGINAS = 200;
+/**
+ * Teto de páginas por rodada — evita laço infinito se o servidor mentir no
+ * `temMais`.
+ *
+ * É BACKSTOP, não orçamento: precisa ficar muito acima de qualquer conjunto
+ * real. Em 200 ele era orçamento — com páginas de 200 registros a carga parava
+ * em 40.000 e um cadastro de cem mil bens ia para o campo pela metade, sem erro
+ * nenhum, porque parar no teto é indistinguível de acabar a paginação para quem
+ * só olha o retorno.
+ */
+const MAX_PAGINAS = 10_000;
 
 export interface ResultadoSincronizacaoTabela {
     tabela: string;
@@ -74,6 +83,16 @@ export const puxarTabela = async (
      */
     const comecouDoZero = !estado.cursorPagina;
 
+    /**
+     * Quanto já veio, para a barra de progresso.
+     *
+     * Numa carga RETOMADA o espelho já guarda as páginas anteriores: começar do
+     * zero faria a barra voltar ao início a cada reabertura do app, e o usuário
+     * concluiria que o download recomeça sozinho e nunca termina.
+     */
+    let baixados = comecouDoZero ? 0 : await contarRegistros(contexto, tabela.nome);
+    let total: number | null = null;
+
     for (let pagina = 0; pagina < MAX_PAGINAS; pagina += 1) {
         const resultado = await tabela.leitura.estrategia.puxar({
             tabela,
@@ -116,6 +135,17 @@ export const puxarTabela = async (
             ultimoErro: null,
         };
         await gravarEstado(contexto, estado);
+
+        // Depois de gravar: o que a tela mostra é o que já está em disco, nunca
+        // o que ainda pode se perder se o app morrer agora.
+        baixados += resultado.registros.length;
+        total = resultado.total ?? total;
+        emissor.emitir('carga:progresso', {
+            tabela: tabela.nome,
+            escopo: contexto.escopo,
+            baixados,
+            total,
+        });
 
         if (!resultado.temMais) {
             concluiuAPaginacao = true;

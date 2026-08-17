@@ -131,6 +131,12 @@ export interface ResultadoPuxada {
     /** Ainda há páginas; o motor chama de novo. */
     temMais: boolean;
     /**
+     * Tamanho do conjunto no servidor, quando ele informa. É o denominador da
+     * barra de progresso — sem ele a tela só sabe dizer quanto já veio, nunca
+     * quanto falta.
+     */
+    total?: number | null;
+    /**
      * Zera a marca d'água: a carga precisa ser refeita do começo.
      *
      * Acontece quando o servidor podou o change log além do nosso cursor —
