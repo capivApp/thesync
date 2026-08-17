@@ -35,6 +35,8 @@ interface RespostaSnapshot {
     items: unknown[];
     nextId: string | null;
     hasMore: boolean;
+    /** Tamanho do conjunto. O servidor só manda na primeira página. */
+    total?: number;
 }
 
 export interface OpcoesPorChangeLog {
@@ -111,6 +113,12 @@ export const porChangeLog = (opcoes: OpcoesPorChangeLog): EstrategiaPuxada => {
                     cursor: cursorZero,
                     cursorPagina: pagina.nextId,
                     temMais: pagina.hasMore,
+                    /**
+                     * Só a primeira página traz o total; o puxador guarda o
+                     * primeiro que recebe pelo resto da rodada, então a barra
+                     * não perde o denominador ao virar de página.
+                     */
+                    total: pagina.total ?? null,
                 };
             }
 
