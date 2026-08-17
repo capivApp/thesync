@@ -28,8 +28,15 @@ export interface EventosSync {
     'fila:progresso': { enviadas: number; total: number; anexos: number };
     /** A fila mudou de tamanho ou de composição. */
     'fila:alterada': { pendentes: number; bloqueadas: number; conflitos: number; anexos: number };
-    /** Uma drenagem começou ou terminou. */
-    'drenagem:estado': { drenando: boolean; motivo?: string };
+    /**
+     * Uma drenagem começou ou terminou. No fim, `motivo` diz POR QUE parou —
+     * `sessao` é o que permite à tela pedir o login que destrava o envio, em
+     * vez de deixar a fila parada em silêncio.
+     */
+    'drenagem:estado': {
+        drenando: boolean;
+        motivo?: 'fim' | 'rede' | 'sessao' | 'orcamento';
+    };
     /** Algo precisa da atenção do usuário. */
     'atencao': { tipo: 'conflito' | 'bloqueada' | 'sessao' | 'armazenamento'; detalhe: string };
 }

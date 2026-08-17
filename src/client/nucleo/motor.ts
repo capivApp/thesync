@@ -288,32 +288,46 @@ export class Motor {
     ): Promise<ResultadoDrenagemCompleta> {
         this.emissor.emitir('drenagem:estado', { drenando: true });
 
+        /**
+         * O motivo viaja NO EVENTO, não só no retorno.
+         *
+         * Quem mais drena são os gatilhos (ciclo de vida do app, volta da rede,
+         * intervalo), e eles descartam o retorno. Sem o motivo no evento, uma
+         * fila parada por sessão recusada era indistinguível de uma fila que
+         * acabou de subir — e a tela não tinha como pedir o login que
+         * destravaria o envio.
+         */
+        let motivo: ResultadoDrenagemCompleta['interrompidaPor'] = 'fim';
+
         try {
             if (!(await conferirConectividade())) {
-                return { escritas: 0, anexos: 0, restantes: 0, interrompidaPor: 'rede' };
+                motivo = 'rede';
+                return { escritas: 0, anexos: 0, restantes: 0, interrompidaPor: motivo };
             }
 
             const escritas = await this.empurrador.drenar(contexto, orcamento);
             if (escritas.interrompidaPor === 'rede' || escritas.interrompidaPor === 'sessao') {
+                motivo = escritas.interrompidaPor;
                 return {
                     escritas: escritas.enviadas,
                     anexos: 0,
                     restantes: escritas.restantes,
-                    interrompidaPor: escritas.interrompidaPor,
+                    interrompidaPor: motivo,
                 };
             }
 
             const anexos = await this.filaDeAnexos.drenar(contexto, orcamento);
             await this.publicarEstadoDaFila(contexto);
 
+            motivo = anexos.interrompidaPor === 'fim' ? escritas.interrompidaPor : anexos.interrompidaPor;
             return {
                 escritas: escritas.enviadas,
                 anexos: anexos.enviados,
                 restantes: escritas.restantes + anexos.restantes,
-                interrompidaPor: anexos.interrompidaPor === 'fim' ? escritas.interrompidaPor : anexos.interrompidaPor,
+                interrompidaPor: motivo,
             };
         } finally {
-            this.emissor.emitir('drenagem:estado', { drenando: false });
+            this.emissor.emitir('drenagem:estado', { drenando: false, motivo });
         }
     }
 
