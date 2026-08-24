@@ -174,6 +174,33 @@ export const MIGRACOES: Migracao[] = [
       ALTER TABLE saida ADD COLUMN base_version INTEGER;
     `,
     },
+    {
+        versao: 5,
+        sql: `
+      -- O ESCOPO faltava no espelho, e só nele.
+      --
+      -- \`sincronizacao_tabelas\` sempre foi por (tabela, escopo): cada escopo
+      -- tem cursor e marca de carga próprios. Já \`registros\` era só
+      -- (entidade, tabela, id) — os escopos dividiam o MESMO espelho.
+      --
+      -- Isso quebrava a operação de CONJUNTO. Uma carga completa termina
+      -- reconciliando ("o que o servidor não listou não existe mais") contra
+      -- \`listarIds\`, que varria a tabela inteira: baixar o escopo B marcava
+      -- como excluído tudo que veio no escopo A. Com dois inventários abertos
+      -- ao mesmo tempo, o segundo apagava o primeiro do aparelho — e a
+      -- contagem, que não era escopada, ainda somava o mesmo espelho duas
+      -- vezes e jurava que estava tudo lá.
+      --
+      -- Fora da chave primária de propósito: o id de um registro continua
+      -- único, então o escopo é uma PARTIÇÃO, não parte da identidade. Linhas
+      -- antigas ficam com '' e são readotadas na próxima carga, que grava o
+      -- escopo por cima.
+      ALTER TABLE registros ADD COLUMN escopo TEXT NOT NULL DEFAULT '';
+
+      CREATE INDEX IF NOT EXISTS ix_registros_escopo
+        ON registros (entidade, tabela, escopo, excluido);
+    `,
+    },
 ];
 
 export const VERSAO_ALVO = MIGRACOES.reduce((maior, migracao) => Math.max(maior, migracao.versao), 0);

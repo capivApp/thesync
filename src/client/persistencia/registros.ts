@@ -137,9 +137,10 @@ export const gravarLote = async (
     await banco.withTransactionAsync(async () => {
         const gravarRegistro = await banco.prepareAsync(`
       INSERT INTO registros
-        (entidade, tabela, id, dados, updated_at, origem, excluido, visto_em, baixado_em)
-      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+        (entidade, tabela, escopo, id, dados, updated_at, origem, excluido, visto_em, baixado_em)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
       ON CONFLICT (entidade, tabela, id) DO UPDATE SET
+        escopo = excluded.escopo,
         dados = excluded.dados,
         updated_at = excluded.updated_at,
         origem = excluded.origem,
@@ -170,6 +171,7 @@ export const gravarLote = async (
                 await gravarRegistro.executeAsync([
                     contexto.entidade,
                     tabela.nome,
+                    contexto.escopo,
                     id,
                     JSON.stringify(registro),
                     typeof updatedAt === 'string' ? updatedAt : null,
@@ -241,8 +243,10 @@ export const listarRegistros = async <T>(
         : '';
     if (filtro.coluna) parametros.push(filtro.coluna);
 
-    const condicoes = ['r.entidade = ?', 'r.tabela = ?'];
-    parametros.push(contexto.entidade, tabela);
+    // O escopo PARTICIONA o espelho: dois inventários abertos guardam os itens
+    // deles na mesma tabela, e sem esta condição um enxergaria os do outro.
+    const condicoes = ['r.entidade = ?', 'r.tabela = ?', 'r.escopo = ?'];
+    parametros.push(contexto.entidade, tabela, contexto.escopo);
 
     if (!filtro.incluirExcluidos) condicoes.push('r.excluido = 0');
 
@@ -263,7 +267,12 @@ export const listarRegistros = async <T>(
     return linhas.map((linha) => paraRegistro<T>(linha));
 };
 
-/** Quantos registros a tabela tem no espelho. Barato: só conta. */
+/**
+ * Quantos registros a tabela tem no espelho DESTE escopo. Barato: só conta.
+ *
+ * Sem o escopo a contagem somava os dois inventários abertos e dizia que
+ * estava tudo baixado enquanto um deles tinha zero item no aparelho.
+ */
 export const contarRegistros = async (
     contexto: ContextoSync,
     tabela: string,
@@ -271,20 +280,28 @@ export const contarRegistros = async (
     const banco = await bancoDaEntidade(contexto.entidade);
     const linha = await banco.getFirstAsync<{ total: number }>(
         `SELECT COUNT(*) AS total FROM registros
-      WHERE entidade = ? AND tabela = ? AND excluido = 0;`,
-        [contexto.entidade, tabela],
+      WHERE entidade = ? AND tabela = ? AND escopo = ? AND excluido = 0;`,
+        [contexto.entidade, tabela, contexto.escopo],
     );
     return linha?.total ?? 0;
 };
 
+/**
+ * Os ids do espelho DESTE escopo.
+ *
+ * É a base da reconciliação, e por isso o escopo aqui não é detalhe: sem ele,
+ * terminar a carga de um escopo marcava como excluído tudo que pertencia aos
+ * outros — baixar o segundo inventário apagava o primeiro do aparelho.
+ */
 export const listarIds = async (
     contexto: ContextoSync,
     tabela: string,
 ): Promise<string[]> => {
     const banco = await bancoDaEntidade(contexto.entidade);
     const linhas = await banco.getAllAsync<{ id: string }>(
-        `SELECT id FROM registros WHERE entidade = ? AND tabela = ? AND excluido = 0;`,
-        [contexto.entidade, tabela],
+        `SELECT id FROM registros
+      WHERE entidade = ? AND tabela = ? AND escopo = ? AND excluido = 0;`,
+        [contexto.entidade, tabela, contexto.escopo],
     );
     return linhas.map((linha) => linha.id);
 };
@@ -300,9 +317,10 @@ export const contarPor = async (
         `SELECT i.valor_texto AS valor, COUNT(*) AS total
        FROM indice_registros i
        JOIN registros r ON r.entidade = i.entidade AND r.tabela = i.tabela AND r.id = i.id
-      WHERE i.entidade = ? AND i.tabela = ? AND i.coluna = ? AND r.excluido = 0
+      WHERE i.entidade = ? AND i.tabela = ? AND i.coluna = ?
+        AND r.escopo = ? AND r.excluido = 0
       GROUP BY i.valor_texto;`,
-        [contexto.entidade, tabela, coluna],
+        [contexto.entidade, tabela, coluna, contexto.escopo],
     );
 
     return linhas.reduce<Record<string, number>>((acumulado, linha) => {
