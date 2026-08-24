@@ -330,8 +330,14 @@ export const contarPor = async (
 };
 
 /**
- * Marca exclusões. O registro NÃO é apagado: uma pendência da fila ainda pode
- * apontar para ele, e a tela precisa conseguir dizer de qual item se tratava.
+ * Marca exclusões DENTRO do escopo. O registro NÃO é apagado: uma pendência da
+ * fila ainda pode apontar para ele, e a tela precisa conseguir dizer de qual
+ * item se tratava.
+ *
+ * O escopo aqui é trava, não filtro: o feed é por TABELA, então o servidor pode
+ * mandar o id de um registro que pertence a outro escopo. Sem esta condição,
+ * sincronizar um inventário apagava do espelho os itens do outro — quem
+ * sincronizasse por último "ganhava", e o anterior aparecia vazio no aparelho.
  */
 export const marcarExcluidos = async (
     contexto: ContextoSync,
@@ -343,10 +349,12 @@ export const marcarExcluidos = async (
     const banco = await bancoDaEntidade(contexto.entidade);
     await banco.withTransactionAsync(async () => {
         const marcar = await banco.prepareAsync(
-            `UPDATE registros SET excluido = 1 WHERE entidade = ? AND tabela = ? AND id = ?;`,
+            `UPDATE registros SET excluido = 1
+              WHERE entidade = ? AND tabela = ? AND escopo = ? AND id = ?;`,
         );
         try {
-            for (const id of ids) await marcar.executeAsync([contexto.entidade, tabela, id]);
+            for (const id of ids)
+                await marcar.executeAsync([contexto.entidade, tabela, contexto.escopo, id]);
         } finally {
             await marcar.finalizeAsync();
         }
