@@ -11,6 +11,8 @@ export type {
     ConfiguracaoMotor,
     EscritaSolicitada,
     EstadoDaFila,
+    LoteRemoto,
+    RegistroRemoto,
     ResultadoDrenagemCompleta,
 } from './nucleo/motor';
 
@@ -31,6 +33,7 @@ export type {
 } from './nucleo/tipos';
 
 export { Emissor } from './nucleo/eventos';
+export { isRetrocesso } from './nucleo/remoto';
 export type { EventosSync, NomeEvento, Ouvinte } from './nucleo/eventos';
 
 export { comAlternativa, type OpcoesComAlternativa } from './puxar/estrategias/comAlternativa';

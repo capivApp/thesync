@@ -60,7 +60,7 @@ const conferirParametros = (sql: string, parametros: unknown[]): void => {
     );
 };
 
-const idDoRegistro = (tabela: DefinicaoTabela, bruto: any): string | null => {
+export const idDoRegistro = (tabela: DefinicaoTabela, bruto: any): string | null => {
     const id = tabela.leitura.extrairId ? tabela.leitura.extrairId(bruto) : bruto?.[tabela.chavePrimaria];
     return typeof id === 'string' && id.length > 0 ? id : null;
 };

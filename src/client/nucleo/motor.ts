@@ -19,7 +19,7 @@ import {
     recuperarAnexosEmVoo,
 } from '../persistencia/anexos';
 import { gravarEstado, lerEstado } from '../persistencia/marcaDagua';
-import { gravarLote, lerRegistro } from '../persistencia/registros';
+import { gravarLote, idDoRegistro, lerRegistro, listarIds } from '../persistencia/registros';
 import {
     contarPendencias,
     enfileirar,
@@ -32,6 +32,7 @@ import { liberarAnexosBloqueados } from '../persistencia/anexos';
 import { puxarTabela } from '../puxar/puxador';
 import { conferirConectividade } from '../rede/conectividade';
 import { Emissor, type NomeEvento, type Ouvinte } from './eventos';
+import { isRetrocesso } from './remoto';
 import { criarRegistroDeTabelas, RegistroDeTabelas } from './registro';
 import type { ContextoSync, DefinicaoTabela } from './tipos';
 
@@ -52,6 +53,18 @@ export interface AnexoSolicitado {
     arquivo: { uri: string; mime: string };
     /** Hash do conteúdo, quando o app já calculou. Evita o duplo-toque. */
     hash?: string;
+}
+
+export interface RegistroRemoto {
+    tabela: string;
+    /** O registro como o servidor o publicou — inteiro ou só um recorte. */
+    registro: Record<string, unknown>;
+}
+
+export interface LoteRemoto {
+    tabela: string;
+    /** Campos que valem para TODOS os registros do escopo. */
+    campos: Record<string, unknown>;
 }
 
 export interface EstadoDaFila {
@@ -226,6 +239,70 @@ export class Motor {
         await this.publicarEstadoDaFila(contexto);
 
         return { id, pendencia };
+    }
+
+    /**
+     * Persiste um registro que chegou de fora do ciclo de pull — o socket.
+     *
+     * O tempo real remendava só a tela: ao sair e voltar, a lista era relida
+     * do espelho e a alteração da outra pessoa sumia. O espelho guarda a
+     * verdade do servidor, e uma mensagem do servidor É essa verdade — ela
+     * entra por aqui com a mesma regra do pull.
+     *
+     * A mensagem costuma ser um recorte (`{id, bem: {imagens}}` no upload), por
+     * isso a gravação é parcial: mescla sobre o que já existe em vez de apagar
+     * nome e plaqueta. E um registro mais VELHO do que o do espelho é ignorado —
+     * a mensagem pode chegar depois de um pull que já trouxe a versão nova.
+     */
+    async applyRegistroRemoto(
+        contexto: ContextoSync,
+        remoto: RegistroRemoto,
+    ): Promise<'gravado' | 'ignorado'> {
+        const tabela = this.registro.obter(remoto.tabela);
+        const id = idDoRegistro(tabela, remoto.registro);
+        if (!id) return 'ignorado';
+
+        const atual = await lerRegistro<Record<string, unknown>>(contexto, tabela.nome, id);
+        if (atual && isRetrocesso(atual.updatedAt, remoto.registro.updatedAt)) return 'ignorado';
+
+        await gravarLote(contexto, tabela, [remoto.registro], { parcial: true });
+
+        const gravado = await lerRegistro<Record<string, unknown>>(contexto, tabela.nome, id);
+        this.emissor.emitir('registro:alterado', {
+            tabela: tabela.nome,
+            id,
+            registro: gravado?.dados ?? remoto.registro,
+        });
+
+        return 'gravado';
+    }
+
+    /**
+     * Uma alteração uniforme em todos os registros do escopo ("marcar todos").
+     *
+     * Chega numa mensagem só, então é gravada numa transação só. Emite
+     * `tabela:sincronizada` em vez de um `registro:alterado` por linha: milhares
+     * de eventos para uma mudança que a tela aplica de uma vez.
+     */
+    async applyLoteRemoto(contexto: ContextoSync, lote: LoteRemoto): Promise<number> {
+        const tabela = this.registro.obter(lote.tabela);
+        const ids = await listarIds(contexto, tabela.nome);
+
+        const gravados = await gravarLote(
+            contexto,
+            tabela,
+            ids.map((id) => ({ [tabela.chavePrimaria]: id, ...lote.campos })),
+            { parcial: true },
+        );
+
+        this.emissor.emitir('tabela:sincronizada', {
+            tabela: tabela.nome,
+            escopo: contexto.escopo,
+            gravados,
+            excluidos: 0,
+        });
+
+        return gravados;
     }
 
     /**

@@ -121,6 +121,27 @@ await motor.anexar({
 });
 ```
 
+### 3b. O que chega pelo socket também vai para o espelho
+
+O tempo real é um empurrão, não a fonte da verdade — mas o que ele traz **é** a
+verdade do servidor, e precisa sobreviver à troca de tela. Remendar só o cache
+da listagem faz a alteração da outra pessoa sumir assim que a lista for relida
+do disco.
+
+```ts
+// Um registro (inteiro ou só um recorte, como `{id, bem: {imagens}}`):
+await motor.applyRegistroRemoto(contexto, { tabela: 'inventario_item', registro: item });
+// -> 'gravado' | 'ignorado' (mais velho do que o que já estava no espelho)
+
+// Uma alteração uniforme em todos os registros do escopo ("marcar todos"):
+await motor.applyLoteRemoto(contexto, { tabela: 'inventario_item', campos: { status: 'ENCONTRADO' } });
+```
+
+`applyRegistroRemoto` grava de forma parcial (mescla sobre o que existe), recusa
+registro mais antigo que o do espelho e emite `registro:alterado` — o mesmo
+evento do envio da fila, então a tela que já o escuta não precisa de nada novo.
+`applyLoteRemoto` grava numa transação só e emite `tabela:sincronizada`.
+
 ### 4. Implemente o transporte
 
 O motor não conhece o seu backend. Ele conhece uma interface:
