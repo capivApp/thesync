@@ -9,7 +9,6 @@
  * o Android concede a tarefas de fundo.
  */
 import { consomeTentativa, exigeOUsuario, interrompeAFila } from '../../protocol/erros';
-import type { Falha } from '../../protocol/erros';
 import type { Transporte } from '../../protocol/transporte';
 import { Emissor } from '../nucleo/eventos';
 import type { RegistroDeTabelas } from '../nucleo/registro';
@@ -21,10 +20,10 @@ import {
     marcarEstado,
     registrarFalha,
     removerPendencia,
-    type EstadoPendencia,
     type Pendencia,
 } from '../persistencia/saida';
-import { esgotouTentativas, proximaTentativaEm } from './backoff';
+import { proximaTentativaEm } from './backoff';
+import { estadoDaPendenciaAposFalha } from './politica';
 
 export interface OrcamentoDrenagem {
     /** Para de pegar pendências novas depois disto. Não aborta a que está em voo. */
@@ -72,13 +71,6 @@ const requisicaoDe = (
     } as const;
 
     return construtores[pendencia.operacao]();
-};
-
-const estadoAposFalha = (falha: Falha, tentativas: number): EstadoPendencia => {
-    if (falha.tipo === 'conflito-versao') return 'conflito';
-    if (exigeOUsuario(falha)) return 'bloqueada';
-    if (consomeTentativa(falha) && esgotouTentativas(tentativas + 1)) return 'bloqueada';
-    return 'pendente';
 };
 
 export class Empurrador {
@@ -166,7 +158,7 @@ export class Empurrador {
                 status: falha.status,
                 contaTentativa: conta,
                 proximaTentativaEm: conta ? proximaTentativaEm(pendencia.tentativas) : 0,
-                estado: estadoAposFalha(falha, pendencia.tentativas),
+                estado: estadoDaPendenciaAposFalha(falha),
             });
 
             if (exigeOUsuario(falha)) {

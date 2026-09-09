@@ -117,6 +117,13 @@ export interface OpcoesDeGravacao {
  *
  * UMA transação com statement preparado. Milhares de gravações soltas levam
  * minutos num Android médio, e o usuário mata o app no meio da carga inicial.
+ *
+ * O recorte NÃO muda o escopo da linha. A drenagem grava a resposta do envio
+ * com o contexto sem escopo (é assim que os gatilhos a chamam), e adotar esse
+ * escopo vazio tirava o item da partição do inventário: a lista, que lê por
+ * escopo, deixava de encontrá-lo no instante em que o envio terminava — e o
+ * item "sumia" até a próxima carga completa reescrever o escopo. Só a carga
+ * inteira readota a linha para o escopo em que o servidor a listou.
  */
 export const gravarLote = async (
     contexto: ContextoSync,
@@ -140,7 +147,7 @@ export const gravarLote = async (
         (entidade, tabela, escopo, id, dados, updated_at, origem, excluido, visto_em, baixado_em)
       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
       ON CONFLICT (entidade, tabela, id) DO UPDATE SET
-        escopo = excluded.escopo,
+        escopo = CASE WHEN ? = 1 THEN registros.escopo ELSE excluded.escopo END,
         dados = excluded.dados,
         updated_at = excluded.updated_at,
         origem = excluded.origem,
@@ -178,6 +185,7 @@ export const gravarLote = async (
                     origem,
                     agora,
                     agora,
+                    parcial ? 1 : 0,
                 ]);
 
                 // Índice na MESMA transação do registro, senão o índice mente.

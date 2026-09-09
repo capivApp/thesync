@@ -232,9 +232,19 @@ O pacote é publicado como **TypeScript cru, sem build** — o Metro transforma
 
 ```bash
 bun run typecheck
+bun test        # os testes de persistência rodam sobre bun:sqlite (test/expoSqliteMock.ts)
 ```
 
 ---
+
+## O que trava e o que só espera
+
+Só o que exige o usuário trava a pendência: payload recusado (4xx), registro que
+sumiu (404) e conflito de versão (409). Erro de servidor (5xx) e erro desconhecido
+**nunca** travam — voltam para a fila com o backoff crescendo até o teto de quinze
+minutos, porque quem corrige um 5xx é um deploy, e a fila precisa subir sozinha
+quando ele acontecer. A foto segue a mesma regra: o servidor deriva a chave do
+upload do conteúdo, então reenviar depois de um 5xx não duplica.
 
 ## Limitações conhecidas
 

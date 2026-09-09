@@ -3,9 +3,9 @@
  *
  * Duas regras que vêm de perder foto em campo:
  *
- * 1. **Só retenta quando não houve resposta.** Se o servidor respondeu — mesmo
- *    com erro — o arquivo pode já ter sido gravado lá. Reenviar às cegas é
- *    como se fabrica duplicata.
+ * 1. **Só trava o que o usuário precisa resolver.** Erro de servidor tenta de
+ *    novo, com calma: a chave do upload é derivada do conteúdo no servidor,
+ *    então reenviar reescreve o mesmo objeto em vez de duplicar a foto.
  * 2. **O arquivo local só é apagado depois da confirmação.** Até lá ele é a
  *    única cópia que existe.
  */
@@ -14,7 +14,8 @@ import type { Transporte } from '../../protocol/transporte';
 import { Emissor } from '../nucleo/eventos';
 import type { RegistroDeTabelas } from '../nucleo/registro';
 import type { ContextoSync, DefinicaoTabela } from '../nucleo/tipos';
-import { esgotouTentativas, proximaTentativaEm } from '../empurrar/backoff';
+import { proximaTentativaEm } from '../empurrar/backoff';
+import { estadoDoAnexoAposFalha } from '../empurrar/politica';
 import {
     contarAnexos,
     listarAnexosProntos,
@@ -131,21 +132,18 @@ export class FilaDeAnexos {
         } catch (erro) {
             const falha = this.transporte.classificar(erro);
 
-            // Sem resposta do servidor: seguro tentar de novo. Com resposta, o
-            // arquivo pode ter sido gravado lá — não insiste às cegas.
-            const podeRetentar = falha.semResposta;
             const conta = consomeTentativa(falha);
-            const bloqueia = !podeRetentar || (conta && esgotouTentativas(anexo.tentativas + 1));
+            const estado = estadoDoAnexoAposFalha(falha);
 
             await registrarFalhaAnexo(contexto, {
                 id: anexo.id,
                 erro: falha.mensagem,
                 contaTentativa: conta,
                 proximaTentativaEm: conta ? proximaTentativaEm(anexo.tentativas) : 0,
-                estado: bloqueia ? 'bloqueado' : 'pendente',
+                estado,
             });
 
-            if (bloqueia) {
+            if (estado === 'bloqueado') {
                 this.emissor.emitir('atencao', {
                     tipo: 'bloqueada',
                     detalhe: `Uma foto não pôde ser enviada: ${falha.mensagem}`,

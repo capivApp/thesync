@@ -61,5 +61,4 @@ export { lerEstado, temCargaCompleta } from './persistencia/marcaDagua';
 export { espacoDisponivel, espacoOcupado } from './anexos/arquivos';
 export { conferirConectividade, estaOnline, monitorarConectividade } from './rede/conectividade';
 export { ligarGatilhos, type OpcoesGatilhos } from './gatilhos/index';
-export { MAX_TENTATIVAS } from './empurrar/backoff';
 export type { OrcamentoDrenagem } from './empurrar/empurrador';
