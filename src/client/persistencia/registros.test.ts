@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { definirTabela } from '../nucleo/tipos';
-import { gravarLote, lerRegistro, listarRegistros } from './registros';
+import { gravarLote, lerRegistro, listarRegistros, marcarExcluidos } from './registros';
 
 const tabela = definirTabela<any>({
     nome: 'inventario_item',
@@ -50,5 +50,39 @@ describe('gravarLote parcial', () => {
             status: 'ENCONTRADO',
         });
         expect(await listarRegistros({ entidade: 3, escopo: 'inv-3' }, 'inventario_item')).toHaveLength(1);
+    });
+});
+
+/**
+ * Gravações concorrentes na MESMA conexão: rotina de fundo, socket, drenagem e
+ * carga escrevem ao mesmo tempo. Sem trava, o segundo `BEGIN` falha, o
+ * `ROLLBACK` dele derruba a transação do primeiro, e o `COMMIT` do primeiro
+ * morre com "cannot rollback - no transaction is active".
+ */
+describe('transações concorrentes na mesma entidade', () => {
+    const contexto = { entidade: 10, escopo: 'inv-10' };
+
+    it('dois lotes ao mesmo tempo gravam os dois sem erro', async () => {
+        await Promise.all([
+            gravarLote(contexto, tabela, [{ id: 'a-1' }, { id: 'a-2' }]),
+            gravarLote(contexto, tabela, [{ id: 'b-1' }, { id: 'b-2' }]),
+            gravarLote(contexto, tabela, [{ id: 'c-1' }], { parcial: true }),
+        ]);
+
+        const ids = (await listarRegistros(contexto, 'inventario_item')).map((registro) => registro.id).sort();
+        expect(ids).toEqual(['a-1', 'a-2', 'b-1', 'b-2', 'c-1']);
+    });
+
+    it('gravar e marcar excluído ao mesmo tempo respeitam a ordem de chegada', async () => {
+        await gravarLote(contexto, tabela, [{ id: 'd-1' }]);
+
+        await Promise.all([
+            marcarExcluidos(contexto, 'inventario_item', ['d-1']),
+            gravarLote(contexto, tabela, [{ id: 'd-2' }]),
+        ]);
+
+        const ids = (await listarRegistros(contexto, 'inventario_item')).map((registro) => registro.id);
+        expect(ids).not.toContain('d-1');
+        expect(ids).toContain('d-2');
     });
 });

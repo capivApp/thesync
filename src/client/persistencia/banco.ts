@@ -16,7 +16,45 @@ export type BancoLocal = SQLite.SQLiteDatabase;
 
 const conexoes = new Map<number, Promise<BancoLocal>>();
 
+/** A transação em andamento (ou a última enfileirada) de cada conexão. */
+const transacoesEmAndamento = new WeakMap<BancoLocal, Promise<unknown>>();
+
 export const nomeDoBanco = (entidade: number): string => `thesync_${entidade}.db`;
+
+/**
+ * UMA transação de cada vez por conexão.
+ *
+ * O `withTransactionAsync` do expo-sqlite é `BEGIN`/`COMMIT`/`ROLLBACK` soltos
+ * na mesma conexão, sem trava nenhuma. Rotina de fundo, socket, drenagem e
+ * carga gravam ao mesmo tempo, e quando duas transações se cruzavam o segundo
+ * `BEGIN` falhava, o `ROLLBACK` dele derrubava a transação da PRIMEIRA, e o
+ * `COMMIT` da primeira morria com "cannot rollback - no transaction is
+ * active" — a contagem ficava presa na fila com esse erro na tela.
+ *
+ * A fila é por conexão: a transação seguinte só começa quando a anterior
+ * terminou, tenha ela dado certo ou não. Quem chama de DENTRO de uma
+ * transação trava para sempre — leia dentro dela, mas não abra outra.
+ */
+export const withTransacao = async <T>(banco: BancoLocal, tarefa: () => Promise<T>): Promise<T> => {
+    const anterior = transacoesEmAndamento.get(banco) ?? Promise.resolve();
+
+    let resultado: T;
+    const atual = anterior
+        .catch(() => undefined)
+        .then(() =>
+            banco.withTransactionAsync(async () => {
+                resultado = await tarefa();
+            }),
+        );
+    transacoesEmAndamento.set(banco, atual);
+
+    try {
+        await atual;
+        return resultado!;
+    } finally {
+        if (transacoesEmAndamento.get(banco) === atual) transacoesEmAndamento.delete(banco);
+    }
+};
 
 const lerVersao = async (banco: BancoLocal): Promise<number> => {
     const linha = await banco.getFirstAsync<{ user_version: number }>('PRAGMA user_version;');
@@ -34,15 +72,10 @@ const migrar = async (banco: BancoLocal): Promise<void> => {
     for (const migracao of pendentes) {
         // Cada migração em sua própria transação: se a 3 falhar, a 2 continua
         // aplicada e a próxima abertura retoma de onde parou.
-        await banco.execAsync('BEGIN;');
-        try {
+        await withTransacao(banco, async () => {
             await banco.execAsync(migracao.sql);
             await banco.execAsync(`PRAGMA user_version = ${migracao.versao};`);
-            await banco.execAsync('COMMIT;');
-        } catch (erro) {
-            await banco.execAsync('ROLLBACK;').catch(() => undefined);
-            throw erro;
-        }
+        });
     }
 };
 

@@ -43,9 +43,15 @@ class SQLiteDatabase {
         return new Statement(this.banco, sql);
     }
 
+    /**
+     * Igual ao expo-sqlite, inclusive no defeito: o `BEGIN` fica dentro do
+     * `try`, então uma segunda transação concorrente falha no `BEGIN` e o
+     * `ROLLBACK` dela derruba a transação da PRIMEIRA. É o que produz o
+     * "cannot rollback - no transaction is active" no aparelho.
+     */
     async withTransactionAsync(trabalho: () => Promise<void>) {
-        this.banco.exec('BEGIN;');
         try {
+            this.banco.exec('BEGIN;');
             await trabalho();
             this.banco.exec('COMMIT;');
         } catch (erro) {

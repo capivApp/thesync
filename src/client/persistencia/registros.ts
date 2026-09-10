@@ -5,7 +5,7 @@
  * `espelho + fila sobreposta`; se o espelho fosse contaminado com edições
  * locais, o app perderia a capacidade de perceber que divergiu do servidor.
  */
-import { bancoDaEntidade } from './banco';
+import { bancoDaEntidade, withTransacao } from './banco';
 import type { ColunaIndexada, ContextoSync, DefinicaoTabela } from '../nucleo/tipos';
 
 export interface RegistroLocal<T = unknown> {
@@ -141,7 +141,7 @@ export const gravarLote = async (
     const colunas = tabela.colunasIndexadas ?? [];
     let gravados = 0;
 
-    await banco.withTransactionAsync(async () => {
+    await withTransacao(banco, async () => {
         const gravarRegistro = await banco.prepareAsync(`
       INSERT INTO registros
         (entidade, tabela, escopo, id, dados, updated_at, origem, excluido, visto_em, baixado_em)
@@ -355,7 +355,7 @@ export const marcarExcluidos = async (
     if (ids.length === 0) return 0;
 
     const banco = await bancoDaEntidade(contexto.entidade);
-    await banco.withTransactionAsync(async () => {
+    await withTransacao(banco, async () => {
         const marcar = await banco.prepareAsync(
             `UPDATE registros SET excluido = 1
               WHERE entidade = ? AND tabela = ? AND escopo = ? AND id = ?;`,

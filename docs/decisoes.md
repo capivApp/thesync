@@ -179,3 +179,21 @@ reconferir o registro antes) e eliminar o duplo-toque (hash local na captura).
 Mas eliminar de verdade exige o servidor: a chave do objeto derivada do **hash
 do conteúdo**, e inserção em conjunto no lugar de concatenação. Aí o reenvio
 reescreve o mesmo objeto e não duplica a entrada.
+
+## 11. Uma transação de cada vez por conexão
+
+O `withTransactionAsync` do expo-sqlite é só `BEGIN`/`COMMIT`/`ROLLBACK` na
+mesma conexão, sem trava. Rotina de fundo, socket, drenagem e carga gravam ao
+mesmo tempo, e quando duas transações se cruzavam o segundo `BEGIN` falhava, o
+`ROLLBACK` dele derrubava a transação da primeira, e o `COMMIT` da primeira
+morria com `cannot rollback - no transaction is active`. A contagem ficava
+presa na fila com esse erro, e a tela dizia que a sincronização tinha falhado.
+
+`withTransacao` (`persistencia/banco.ts`) enfileira as transações por conexão:
+a seguinte só começa quando a anterior terminou, com ou sem erro. Toda
+transação do pacote passa por ela — inclusive a das migrações. Ler de dentro
+de uma transação é permitido; abrir outra de dentro trava para sempre.
+
+O mock de testes (`test/expoSqliteMock.ts`) reproduz o expo-sqlite de
+propósito, defeito incluído, para o teste de concorrência falhar do mesmo jeito
+que o aparelho.
