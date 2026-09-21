@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { definirTabela } from '../nucleo/tipos';
-import { gravarLote, lerRegistro, listarRegistros, marcarExcluidos } from './registros';
+import { gravarLote, lerRegistro, listarRegistros, marcarExcluidos, reconciliarConjunto } from './registros';
 
 const tabela = definirTabela<any>({
     nome: 'inventario_item',
@@ -84,5 +84,27 @@ describe('transações concorrentes na mesma entidade', () => {
         const ids = (await listarRegistros(contexto, 'inventario_item')).map((registro) => registro.id);
         expect(ids).not.toContain('d-1');
         expect(ids).toContain('d-2');
+    });
+});
+
+describe('reconciliarConjunto', () => {
+    it('não apaga o registro criado no aparelho que o servidor ainda não conhece', async () => {
+        const contexto = { entidade: 20, escopo: '' };
+        await gravarLote(contexto, tabela, [{ id: 'do-servidor' }, { id: 'sumiu' }]);
+        await gravarLote(contexto, tabela, [{ id: 'criado-offline' }], 'local');
+
+        const sumidos = await reconciliarConjunto(contexto, 'inventario_item', ['do-servidor']);
+
+        expect(sumidos).toEqual(['sumiu']);
+        const restantes = await listarRegistros(contexto, 'inventario_item');
+        expect(restantes.map((registro) => registro.id).sort()).toEqual(['criado-offline', 'do-servidor']);
+    });
+
+    it('depois que o servidor devolve o registro, ele volta a ser reconciliado', async () => {
+        const contexto = { entidade: 21, escopo: '' };
+        await gravarLote(contexto, tabela, [{ id: 'criado-offline' }], 'local');
+        await gravarLote(contexto, tabela, [{ id: 'criado-offline', name: 'Sala 12' }]);
+
+        expect(await reconciliarConjunto(contexto, 'inventario_item', [])).toEqual(['criado-offline']);
     });
 });

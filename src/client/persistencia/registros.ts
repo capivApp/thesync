@@ -372,9 +372,30 @@ export const marcarExcluidos = async (
 };
 
 /**
+ * Os ids do escopo que o servidor já conhece.
+ *
+ * A linha criada no aparelho (`origem = 'local'`) fica de fora: o servidor não
+ * a lista porque ainda não a recebeu, e não porque ela foi excluída. Quando o
+ * envio termina, a gravação da resposta a passa para `servidor`.
+ */
+const findIdsDoServidor = async (contexto: ContextoSync, tabela: string): Promise<string[]> => {
+    const banco = await bancoDaEntidade(contexto.entidade);
+    const linhas = await banco.getAllAsync<{ id: string }>(
+        `SELECT id FROM registros
+      WHERE entidade = ? AND tabela = ? AND escopo = ? AND excluido = 0 AND origem != 'local';`,
+        [contexto.entidade, tabela, contexto.escopo],
+    );
+    return linhas.map((linha) => linha.id);
+};
+
+/**
  * Reconciliação por conjunto completo: tudo que o servidor NÃO listou está
  * excluído. É como o app descobre exclusões enquanto o backend não manda
  * tombstone — e por isso `ResultadoPuxada.completo` existe.
+ *
+ * O que foi criado offline e ainda não subiu nunca entra na conta. Sem isso,
+ * uma sublocalização cadastrada sem sinal sumia do seletor na primeira carga
+ * que rodasse antes de o envio dela dar certo, com a pendência ainda na fila.
  */
 export const reconciliarConjunto = async (
     contexto: ContextoSync,
@@ -382,7 +403,7 @@ export const reconciliarConjunto = async (
     idsPresentes: string[],
 ): Promise<string[]> => {
     const presentes = new Set(idsPresentes);
-    const locais = await listarIds(contexto, tabela);
+    const locais = await findIdsDoServidor(contexto, tabela);
     const sumidos = locais.filter((id) => !presentes.has(id));
     await marcarExcluidos(contexto, tabela, sumidos);
     return sumidos;

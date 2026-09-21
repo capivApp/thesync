@@ -171,6 +171,20 @@ Só funciona em tabela que declara `estrategiaId: 'id-do-cliente'` e cuja rota
 de escrita aponte para o endpoint de upsert do servidor. Nas demais, quem
 decide o id é o servidor e criar offline não seria seguro.
 
+Quem aponta para o registro novo usa esse mesmo id desde o primeiro toque, e
+é ele que o servidor grava: não existe chave para trocar depois do envio. O
+motor garante a ORDEM (0.13.0):
+
+- **Quem referencia espera a criação.** Uma pendência cujo payload aponta, por
+  um campo de `referencias`, para um registro com criação ainda na fila não é
+  enviada: fica `pendente`, sem gastar tentativa, até a criação subir. A edição
+  de um registro que ainda não foi criado espera também. Sem isso, uma criação
+  em backoff (5xx) deixava o item passar na frente e o servidor o recusava por
+  chave estrangeira.
+- **A carga não apaga o que ainda não subiu.** A reconciliação por conjunto
+  completo ignora as linhas `origem = 'local'`: o servidor não as lista porque
+  ainda não as recebeu.
+
 ### 6. Lado servidor
 
 ```ts

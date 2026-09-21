@@ -16,6 +16,7 @@ import type { ContextoSync, DefinicaoTabela } from '../nucleo/tipos';
 import { gravarLote, lerRegistro } from '../persistencia/registros';
 import {
     contarPendencias,
+    listarPendencias,
     listarProntas,
     marcarEstado,
     registrarFalha,
@@ -24,6 +25,7 @@ import {
 } from '../persistencia/saida';
 import { proximaTentativaEm } from './backoff';
 import { estadoDaPendenciaAposFalha } from './politica';
+import { collectCriacoesPendentes, isAguardandoReferencia } from './referencias';
 
 export interface OrcamentoDrenagem {
     /** Para de pegar pendências novas depois disto. Não aborta a que está em voo. */
@@ -49,7 +51,7 @@ export interface ResultadoDrenagem {
  * "Sem conexão" para quem estava com sinal cheio, e a contagem do dia ficava
  * parada esperando uma reconexão que já tinha acontecido.
  */
-type Desfecho = 'enviada' | 'falhou' | 'parar-rede' | 'parar-sessao';
+type Desfecho = 'enviada' | 'falhou' | 'aguardando' | 'parar-rede' | 'parar-sessao';
 
 const requisicaoDe = (
     tabela: DefinicaoTabela,
@@ -177,6 +179,20 @@ export class Empurrador {
         const limite = orcamento.limiteMs ? Date.now() + orcamento.limiteMs : Infinity;
         const prontas = await listarProntas(contexto);
         const alvo = orcamento.limiteItens ? prontas.slice(0, orcamento.limiteItens) : prontas;
+        // A fila inteira, não só as prontas: criação em backoff ou travada
+        // também ainda não chegou ao servidor.
+        const criacoes = collectCriacoesPendentes(await listarPendencias(contexto));
+
+        const processInOrder = async (pendencia: Pendencia): Promise<Desfecho> => {
+            const tabela = this.registro.obter(pendencia.tabela);
+            if (isAguardandoReferencia(tabela, pendencia, criacoes)) return 'aguardando';
+
+            const desfecho = await this.processar(contexto, pendencia);
+            if (desfecho === 'enviada' && pendencia.operacao === 'criar') {
+                criacoes.get(pendencia.tabela)?.delete(pendencia.registroId);
+            }
+            return desfecho;
+        };
 
         let enviadas = 0;
         let falhas = 0;
@@ -192,7 +208,7 @@ export class Empurrador {
                 break;
             }
 
-            const desfecho = await this.processar(contexto, pendencia);
+            const desfecho = await processInOrder(pendencia);
             if (desfecho === 'enviada') enviadas += 1;
             if (desfecho === 'falhou') falhas += 1;
             if (desfecho === 'parar-rede' || desfecho === 'parar-sessao') {

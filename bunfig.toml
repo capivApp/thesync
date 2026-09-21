@@ -1,2 +1,2 @@
 [test]
-preload = ["./test/expoSqliteMock.ts"]
+preload = ["./test/expoSqliteMock.ts", "./test/expoCryptoMock.ts"]
