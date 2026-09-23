@@ -5,7 +5,7 @@
  * rodam em Expo Go, sem módulo nativo customizado: testar em campo não pode
  * depender de gerar build.
  */
-export { criarMotor, Motor } from './nucleo/motor';
+export { criarMotor, DescarteBloqueadoError, Motor } from './nucleo/motor';
 export type {
     AnexoSolicitado,
     ConfiguracaoMotor,

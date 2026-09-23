@@ -226,6 +226,39 @@ export const lerRegistro = async <T>(
     return linha ? paraRegistro<T>(linha) : null;
 };
 
+/**
+ * Apaga um registro que só existe no aparelho (`origem = 'local'`).
+ *
+ * É o caminho do descarte de uma criação offline: a pendência sai da fila e o
+ * registro não pode ficar no espelho, senão o seletor continuaria oferecendo
+ * algo que o servidor nunca vai conhecer. O que veio do servidor não é tocado.
+ */
+export const deleteRegistroLocal = async (
+    contexto: ContextoSync,
+    tabela: string,
+    id: string,
+): Promise<boolean> => {
+    const banco = await bancoDaEntidade(contexto.entidade);
+    let apagado = false;
+
+    await withTransacao(banco, async () => {
+        const resultado = await banco.runAsync(
+            `DELETE FROM registros WHERE entidade = ? AND tabela = ? AND id = ? AND origem = 'local';`,
+            [contexto.entidade, tabela, id],
+        );
+        apagado = resultado.changes > 0;
+        if (!apagado) return;
+
+        await banco.runAsync(`DELETE FROM indice_registros WHERE entidade = ? AND tabela = ? AND id = ?;`, [
+            contexto.entidade,
+            tabela,
+            id,
+        ]);
+    });
+
+    return apagado;
+};
+
 export const listarRegistros = async <T>(
     contexto: ContextoSync,
     tabela: string,

@@ -260,6 +260,23 @@ minutos, porque quem corrige um 5xx é um deploy, e a fila precisa subir sozinha
 quando ele acontecer. A foto segue a mesma regra: o servidor deriva a chave do
 upload do conteúdo, então reenviar depois de um 5xx não duplica.
 
+## Destravar e descartar
+
+- **`drenar()` é single-flight**: quem chama com uma drenagem em voo espera a
+  mesma promessa. O lado ruim é que uma requisição que nunca volta segura a vez
+  de todo mundo, inclusive do envio disparado pelo login.
+- **`forceDrenagem()`** abandona a drenagem em voo e começa outra na hora. A
+  abandonada para antes da próxima pendência e não emite mais `drenagem:estado`;
+  o que ela deixou em `enviando` é reenviado com a mesma chave de idempotência.
+  Dê ao transporte um timeout de qualquer forma: forçar é a saída do usuário, não
+  o conserto de uma requisição sem prazo.
+- **`discardPendencia(contexto, id)`** tira a alteração da fila. A criação offline
+  leva junto o registro `origem = 'local'` do espelho (emite `registro:excluido`);
+  a edição devolve a tela ao espelho (emite `registro:alterado`). Descartar uma
+  criação que outras pendências referenciam lança `DescarteBloqueadoError`, com
+  `dependentes`.
+- **`discardAnexo(contexto, id)`** tira a foto da fila e apaga o arquivo guardado.
+
 ## Limitações conhecidas
 
 - **Envio em segundo plano não está ligado.** Expo Go não roda JS headless, e a

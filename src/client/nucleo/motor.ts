@@ -10,22 +10,27 @@ import { randomUUID } from 'expo-crypto';
 
 import type { Transporte } from '../../protocol/transporte';
 import { FilaDeAnexos } from '../anexos/filaAnexos';
-import { guardarArquivo, novoIdDeAnexo } from '../anexos/arquivos';
+import { descartarArquivo, guardarArquivo, novoIdDeAnexo } from '../anexos/arquivos';
 import { Empurrador, type OrcamentoDrenagem } from '../empurrar/empurrador';
+import { collectCriacoesPendentes, isAguardandoReferencia } from '../empurrar/referencias';
 import {
     contarAnexos,
     enfileirarAnexo,
     jaEnfileirado,
+    listarAnexos,
     recuperarAnexosEmVoo,
+    removerAnexo,
 } from '../persistencia/anexos';
 import { gravarEstado, lerEstado } from '../persistencia/marcaDagua';
-import { gravarLote, idDoRegistro, lerRegistro, listarIds } from '../persistencia/registros';
+import { deleteRegistroLocal, gravarLote, idDoRegistro, lerRegistro, listarIds } from '../persistencia/registros';
 import {
     contarPendencias,
     enfileirar,
     idadeDaMaisAntiga,
     liberarBloqueadas,
+    listarPendencias,
     recuperarEmVoo,
+    removerPendencia,
     type Pendencia,
 } from '../persistencia/saida';
 import { liberarAnexosBloqueados } from '../persistencia/anexos';
@@ -84,12 +89,27 @@ export interface ResultadoDrenagemCompleta {
     interrompidaPor: 'fim' | 'rede' | 'sessao' | 'orcamento';
 }
 
+/** O descarte de uma criação da qual outras pendências ainda dependem. */
+export class DescarteBloqueadoError extends Error {
+    constructor(readonly dependentes: number) {
+        super('Outras alterações dependem deste registro. Remova-as antes.');
+        this.name = 'DescarteBloqueadoError';
+    }
+}
+
+interface DrenagemEmVoo {
+    controle: AbortController;
+    promessa: Promise<ResultadoDrenagemCompleta>;
+}
+
+const DRENAGEM_VAZIA: ResultadoDrenagemCompleta = { escritas: 0, anexos: 0, restantes: 0, interrompidaPor: 'fim' };
+
 export class Motor {
     private readonly registro: RegistroDeTabelas;
     private readonly emissor = new Emissor();
     private readonly empurrador: Empurrador;
     private readonly filaDeAnexos: FilaDeAnexos;
-    private drenagemEmVoo: Promise<ResultadoDrenagemCompleta> | null = null;
+    private drenagemEmVoo: DrenagemEmVoo | null = null;
 
     constructor(private readonly configuracao: ConfiguracaoMotor) {
         this.registro = criarRegistroDeTabelas(configuracao.tabelas);
@@ -353,15 +373,47 @@ export class Motor {
      * ver refletida. Um upload de 2 MB no 3G não pode segurar dez contagens.
      */
     drenar(contexto: ContextoSync, orcamento: OrcamentoDrenagem = {}): Promise<ResultadoDrenagemCompleta> {
-        this.drenagemEmVoo ??= this.executarDrenagem(contexto, orcamento).finally(() => {
-            this.drenagemEmVoo = null;
-        });
-        return this.drenagemEmVoo;
+        return this.drenagemEmVoo?.promessa ?? this.startDrenagem(contexto, orcamento);
+    }
+
+    /**
+     * Drena AGORA, mesmo com outra drenagem em voo.
+     *
+     * O single-flight tem um lado ruim: uma requisição que nunca volta segura a
+     * vez de todo mundo. O login, o gatilho do intervalo e o botão da tela
+     * passavam a esperar a mesma promessa presa, e a fila de um aparelho ficou
+     * meia hora sem enviar nada com a sessão válida.
+     *
+     * A drenagem anterior é abandonada: ela para antes da próxima pendência e
+     * não anuncia mais nada. O que ela deixou em `enviando` é reenviado com a
+     * mesma chave de idempotência, então repetir não duplica.
+     */
+    forceDrenagem(contexto: ContextoSync, orcamento: OrcamentoDrenagem = {}): Promise<ResultadoDrenagemCompleta> {
+        this.drenagemEmVoo?.controle.abort();
+        return this.startDrenagem(contexto, orcamento);
+    }
+
+    private startDrenagem(contexto: ContextoSync, orcamento: OrcamentoDrenagem): Promise<ResultadoDrenagemCompleta> {
+        const controle = new AbortController();
+        orcamento.sinal?.addEventListener('abort', () => controle.abort(), { once: true });
+        if (orcamento.sinal?.aborted) controle.abort();
+
+        const drenagem: DrenagemEmVoo = { controle, promessa: Promise.resolve(DRENAGEM_VAZIA) };
+        const isAtual = () => this.drenagemEmVoo === drenagem;
+
+        this.drenagemEmVoo = drenagem;
+        drenagem.promessa = this.executarDrenagem(contexto, { ...orcamento, sinal: controle.signal }, isAtual).finally(
+            () => {
+                if (isAtual()) this.drenagemEmVoo = null;
+            },
+        );
+        return drenagem.promessa;
     }
 
     private async executarDrenagem(
         contexto: ContextoSync,
         orcamento: OrcamentoDrenagem,
+        isAtual: () => boolean,
     ): Promise<ResultadoDrenagemCompleta> {
         this.emissor.emitir('drenagem:estado', { drenando: true });
 
@@ -404,8 +456,72 @@ export class Motor {
                 interrompidaPor: motivo,
             };
         } finally {
-            this.emissor.emitir('drenagem:estado', { drenando: false, motivo });
+            // A abandonada por `forceDrenagem` fica calada: quem fala agora é a nova.
+            if (isAtual()) this.emissor.emitir('drenagem:estado', { drenando: false, motivo });
         }
+    }
+
+    /**
+     * Tira uma alteração da fila sem enviá-la. É decisão do usuário, na tela de
+     * pendências; o motor nunca descarta nada sozinho.
+     *
+     * A criação offline leva junto o registro que só existia no aparelho. E ela
+     * é recusada enquanto outra pendência apontar para o registro criado: a
+     * sublocalização descartada deixaria cada item que a usa subindo com uma
+     * referência que o servidor não conhece.
+     */
+    async discardPendencia(contexto: ContextoSync, id: string): Promise<void> {
+        const pendencias = await listarPendencias(contexto);
+        const alvo = pendencias.find((pendencia) => pendencia.id === id);
+        if (!alvo) return;
+
+        const dependentes = this.countDependentes(alvo, pendencias);
+        if (dependentes > 0) throw new DescarteBloqueadoError(dependentes);
+
+        await removerPendencia(contexto, id);
+        await this.announceDescarte(contexto, alvo);
+        await this.publicarEstadoDaFila(contexto);
+    }
+
+    /** A foto sai da fila e do disco: sem pendência, o arquivo guardado vira lixo. */
+    async discardAnexo(contexto: ContextoSync, id: string): Promise<void> {
+        const anexo = (await listarAnexos(contexto)).find((atual) => atual.id === id);
+        if (!anexo) return;
+
+        await removerAnexo(contexto, id);
+        descartarArquivo(anexo.caminho);
+        await this.publicarEstadoDaFila(contexto);
+    }
+
+    private countDependentes(alvo: Pendencia, pendencias: Pendencia[]): number {
+        if (alvo.operacao !== 'criar') return 0;
+
+        const criacao = collectCriacoesPendentes([alvo]);
+        return pendencias.filter(
+            (pendencia) =>
+                pendencia.id !== alvo.id &&
+                isAguardandoReferencia(this.registro.obter(pendencia.tabela), pendencia, criacao),
+        ).length;
+    }
+
+    /**
+     * A tela mostra espelho + fila. Sem a pendência, quem mostra o registro
+     * precisa voltar ao que o espelho diz, ou deixar de mostrá-lo.
+     */
+    private async announceDescarte(contexto: ContextoSync, descartada: Pendencia): Promise<void> {
+        const apagado = await deleteRegistroLocal(contexto, descartada.tabela, descartada.registroId);
+        if (apagado) {
+            this.emissor.emitir('registro:excluido', { tabela: descartada.tabela, id: descartada.registroId });
+            return;
+        }
+
+        const espelho = await lerRegistro(contexto, descartada.tabela, descartada.registroId);
+        if (!espelho) return;
+        this.emissor.emitir('registro:alterado', {
+            tabela: descartada.tabela,
+            id: descartada.registroId,
+            registro: espelho.dados,
+        });
     }
 
     async estadoDaFila(contexto: ContextoSync): Promise<EstadoDaFila> {
